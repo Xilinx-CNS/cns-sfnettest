@@ -1,0 +1,11 @@
+*~
+*.orig
+*.rej
+*.d
+*.o
+*.pyc
+*.old
+*.user
+*.a
+*.so
+ntpingpong

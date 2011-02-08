@@ -1,0 +1,63 @@
+
+ntpingpong
+==========
+
+Introduction
+------------
+
+ ntpingpong measures ping-pong latency over a range of message sizes, using
+ the following network and IPC mechanisms:
+
+ - TCP sockets
+ - UDP sockets
+ - UNIX stream sockets
+ - UNIX datagram sockets
+ - pipes
+
+
+Measuring network latency
+-------------------------
+
+ For measuring latency over a network, first start a "server" instance one
+ one node:
+
+   host1$ ntpingpong
+
+ Then start a "client" instance on another node, passing the name of the
+ server node as follows:
+
+   host2$ ntpingpong tcp host1
+
+ or for UDP:
+
+   host2$ ntpingpong udp host1
+
+
+Measuring IPC latency
+---------------------
+
+ For pipes and unix domain sockets (and for inet sockets using the loopback
+ interface), there is no need to run a separate server process:
+
+   host$ ntpingpong pipe
+
+   host$ ntpingpong unix_stream
+
+   host$ ntpingpong unix_datagram
+
+
+Options
+-------
+
+ There are numerous options to change details of the test.  The include:
+
+ - An option to "spin" making non-blocking calls (--spin)
+ - An option to use select, poll or epoll for blocking (--muxer)
+ - Options to add more file descriptors to select, poll and epoll
+   (--n-pipe, --n-udp, --n-tcpc, --n-tcpl)
+ - Options to use multicast with UDP (--mcast, --mcastintf, --mcastloop)
+ - An option to set CPU affinity (--affinty)
+
+ To get the full list, invoke:
+
+   host$ ntpingpong --help

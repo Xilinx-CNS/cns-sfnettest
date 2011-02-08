@@ -1,0 +1,24 @@
+
+SfNetTest
+=========
+
+ sfnettest is a suite of network performance measuring tools developed by
+ Solarflare.  It differs from existing tools in some of the options it
+ provides, which allow probing of particular application behaviours.
+
+ This first release is only supported on Linux, and only includes one tool;
+ ntpingpong.  We hope port more of our tools into this framework over time.
+
+
+Building
+========
+
+ cd sfnettest-ver/src
+ make
+
+
+ See README.<appname> for instructions on running each tool.
+
+
+David Riddoch
+2010/10/29
