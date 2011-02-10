@@ -287,6 +287,26 @@ static ssize_t epoll_mod_recv(int fd, void* buf, size_t len, int flags)
   return got ? got : rc;
 }
 
+
+static ssize_t epoll_adddel_recv(int fd, void* buf, size_t len, int flags)
+{
+  struct epoll_event e;
+  int rc, got = 0, all = flags & MSG_WAITALL;
+  flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
+  e.events = EPOLLIN;
+  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &e));
+  do {
+    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, cfg_spin);
+    NT_TESTi3(rc, ==, 1);
+    NT_TEST(e.events & EPOLLIN);
+    if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
+      got += rc;
+  } while( all && got < len && rc > 0 );
+  e.events = 0;
+  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, &e));
+  return got ? got : rc;
+}
+
 #endif
 
 /**********************************************************************/
@@ -356,6 +376,11 @@ static void do_init(void)
   else if( ! strcasecmp(cfg_muxer, "epoll_mod") ) {
     mux_recv = epoll_mod_recv;
     mux_add = epoll_add;
+    epoll_init();
+  }
+  else if( ! strcasecmp(cfg_muxer, "epoll_adddel") ) {
+    mux_recv = epoll_adddel_recv;
+    mux_add = noop_add;
     epoll_init();
   }
 #endif
