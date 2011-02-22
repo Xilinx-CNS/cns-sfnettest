@@ -1,12 +1,12 @@
 
-ntpingpong
-==========
+sfnt-pingpong
+=============
 
 Introduction
 ------------
 
- ntpingpong measures ping-pong latency over a range of message sizes, using
- the following network and IPC mechanisms:
+ sfnt-pingpong measures ping-pong latency over a range of message sizes,
+ using the following network and IPC mechanisms:
 
  - TCP sockets
  - UDP sockets
@@ -21,29 +21,29 @@ Measuring network latency
  For measuring latency over a network, first start a "server" instance one
  one node:
 
-   host1$ ntpingpong
+   host1$ sfnt-pingpong
 
  Then start a "client" instance on another node, passing the name of the
  server node as follows:
 
-   host2$ ntpingpong tcp host1
+   host2$ sfnt-pingpong tcp host1
 
  or for UDP:
 
-   host2$ ntpingpong udp host1
+   host2$ sfnt-pingpong udp host1
 
 
 Measuring IPC latency
 ---------------------
 
  For pipes and unix domain sockets (and for inet sockets using the loopback
- interface), there is no need to run a separate server process:
+ interface), there is no need to run a separate server process.
 
-   host$ ntpingpong pipe
+   host$ sfnt-pingpong pipe
 
-   host$ ntpingpong unix_stream
+   host$ sfnt-pingpong unix_stream
 
-   host$ ntpingpong unix_datagram
+   host$ sfnt-pingpong unix_datagram
 
 
 Options
@@ -60,4 +60,4 @@ Options
 
  To get the full list, invoke:
 
-   host$ ntpingpong --help
+   host$ sfnt-pingpong --help

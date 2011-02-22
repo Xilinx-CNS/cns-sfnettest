@@ -1,5 +1,5 @@
 /**************************************************************************\
-*    Filename: ntpingpong.c
+*    Filename: sfnt-pingpong.c
 *      Author: David Riddoch <driddoch@solarflare.com>
 * Description: Application to measure ping-pong latency.
 *  Start date: 2005/03/06
