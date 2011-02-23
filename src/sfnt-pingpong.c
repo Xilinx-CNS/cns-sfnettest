@@ -20,13 +20,14 @@ static int         cfg_spin;
 static const char* cfg_muxer;
 static const char* cfg_smuxer;
 static int         cfg_rtt;
-static int         cfg_percentile = 99;
 static const char* cfg_raw;
-static int         cfg_miniter;
-static int         cfg_maxiter;
-static int         cfg_maxmsg;
+static int         cfg_percentile = 99;
 static int         cfg_minmsg;
-static int         cfg_error = 5;
+static int         cfg_maxmsg;
+static int         cfg_minms = 1000;
+static int         cfg_maxms = 3000;
+static int         cfg_miniter = 1000;
+static int         cfg_maxiter = 1000000;
 static int         cfg_forkboth;
 static const char* cfg_mcast;
 static const char* cfg_mcast_intf;
@@ -52,11 +53,12 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   {   0, "rtt",      NT_CLO_FLAG, &cfg_rtt,    "report round-trip-time"      },
   {   0, "raw",      NT_CLO_STR,  &cfg_raw,    "dump raw results to files"   },
   {   0, "percentile",NT_CLO_UINT,&cfg_percentile,"percentile"               },
-  {   0, "maxmsg",   NT_CLO_INT,  &cfg_maxmsg, "max message size"            },
   {   0, "minmsg",   NT_CLO_INT,  &cfg_minmsg, "min message size"            },
+  {   0, "maxmsg",   NT_CLO_INT,  &cfg_maxmsg, "max message size"            },
+  {   0, "minms",    NT_CLO_INT,  &cfg_minms,  "min time per msg size (ms)"  },
+  {   0, "maxms",    NT_CLO_INT,  &cfg_maxms,  "max time per msg size (ms)"  },
   {   0, "miniter",  NT_CLO_INT,  &cfg_miniter,"min iterations for result"   },
   {   0, "maxiter",  NT_CLO_INT,  &cfg_maxiter,"max iterations for result"   },
-  {   0, "error",    NT_CLO_INT,  &cfg_error,  "target standard error (%%)"  },
   {   0, "mcast",    NT_CLO_STR,  &cfg_mcast,  "use multicast addressing"    },
   {   0, "mcastintf",NT_CLO_STR,  &cfg_mcast_intf,"set multicast interface"  },
   {   0, "mcastloop",NT_CLO_FLAG, &cfg_mcast_loop,"IP_MULTICAST_LOOP"        },
@@ -678,11 +680,14 @@ static void write_raw_results(int msg_size, int* results, int results_n)
 static void do_test(int ss, int read_fd, int write_fd,
                     int msg_size, int* results)
 {
-  struct stats s;
-  int results_n = 0;
   int n_this_time = cfg_miniter;
+  struct timeval start, end;
+  int ms, results_n = 0;
+  struct stats s;
 
-  while( 1 ) {
+  gettimeofday(&start, NULL);
+
+  do {
     if( results_n + n_this_time > cfg_maxiter )
       n_this_time = cfg_maxiter - results_n;
 
@@ -690,23 +695,18 @@ static void do_test(int ss, int read_fd, int write_fd,
              n_this_time, results + results_n);
     results_n += n_this_time;
 
-    if( results_n == cfg_maxiter )
-      break;
-    if( cfg_raw == NULL ) {
-      /* Don't call get_stats() if writing raw results, as it sorts the
-       * results!
-       */
-      get_stats(&s, results, results_n);
-      if( s.stddev * 100 / s.mean <= cfg_error )
-        break;
-    }
-  }
+    gettimeofday(&end, NULL);
+    ms = (end.tv_sec - start.tv_sec) * 1000;
+    ms += (end.tv_usec - start.tv_usec) / 1000;
+  } while( (ms < cfg_maxms && results_n < cfg_maxiter) ||
+           (ms < cfg_minms || results_n < cfg_miniter) );
 
   if( cfg_raw != NULL )
     write_raw_results(msg_size, results, results_n);
   get_stats(&s, results, results_n);
   printf("\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", msg_size,
          s.mean, s.min, s.median, s.max, s.percentile, s.stddev, results_n);
+  fflush(stdout);
 }
 
 
@@ -826,7 +826,7 @@ static int do_client(int argc, char* argv[])
     }
   }
   else {
-    int ss, local;
+    int ss, local, one = 1;
     if( argc == 2 ) {
       hostport = argv[1];
       local = 0;
@@ -841,6 +841,7 @@ static int do_client(int argc, char* argv[])
       local = 1;
     }
     NT_TRY2(ss, socket(PF_INET, SOCK_STREAM, 0));
+    NT_TRY(setsockopt(ss, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
     NT_TRY(try_connect(ss, hostport, cfg_port));
     return do_client2(ss, hostport, local);
   }
@@ -949,8 +950,8 @@ static int do_client2(int ss, const char* hostport, int local)
   printf("# muxer=%s serv-muxer=%s\n",
          cfg_muxer, cfg_smuxer ? cfg_smuxer : cfg_muxer);
   printf("# affinity=%s\n", cfg_affinity);
-  printf("# miniter=%d maxiter=%d error=%d\n",
-         cfg_miniter, cfg_maxiter, cfg_error);
+  printf("# iter=%d-%d ms=%d-%d\n",
+         cfg_miniter, cfg_maxiter, cfg_minms, cfg_maxms);
   printf("# multicast=%s loop=%d\n",
          cfg_mcast ? cfg_mcast : "NO", cfg_mcast_loop);
   printf("# server_onload=%d\n", server_onload);
@@ -994,12 +995,10 @@ int main(int argc, char* argv[])
                 &argc, argv, cfg_opts, N_CFG_OPTS);
   --argc; ++argv;
 
-  if( cfg_miniter == 0 && cfg_maxiter == 0 )
-    cfg_miniter = cfg_maxiter = 10000;
-  else if( cfg_miniter == 0 )
-    cfg_miniter = cfg_maxiter;
-  else if( cfg_maxiter == 0 )
+  if( cfg_miniter > cfg_maxiter )
     cfg_maxiter = cfg_miniter;
+  if( cfg_minms > cfg_maxms )
+    cfg_maxms = cfg_minms;
   NT_ASSERT(cfg_maxiter >= cfg_miniter);
   timeout_ms = cfg_timeout ? cfg_timeout * 1000 : -1;
 
