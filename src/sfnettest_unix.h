@@ -1,3 +1,14 @@
+/**************************************************************************\
+*    Filename: sfnettest_unix.c
+*      Author: David Riddoch <driddoch@solarflare.com>
+* Description: Compatibility layer for UNIX platforms.
+*   Copyright: (C) 2005-2011 Solarflare Communications Inc.
+*
+* This program is free software; you can redistribute it and/or modify it
+* under the terms of the GNU General Public License version 2 as published
+* by the Free Software Foundation, incorporated herein by reference.
+\**************************************************************************/
+
 #ifndef __NETTEST_UNIX_H__
 #define __NETTEST_UNIX_H__
 

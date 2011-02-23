@@ -1,3 +1,14 @@
+/**************************************************************************\
+*    Filename: sfnt_socket.c
+*      Author: David Riddoch <driddoch@solarflare.com>
+* Description: Socket convenience routines.
+*   Copyright: (C) 2005-2011 Solarflare Communications Inc.
+*
+* This program is free software; you can redistribute it and/or modify it
+* under the terms of the GNU General Public License version 2 as published
+* by the Free Software Foundation, incorporated herein by reference.
+\**************************************************************************/
+
 #include "sfnettest.h"
 #ifdef __unix__
 # include <net/if.h>

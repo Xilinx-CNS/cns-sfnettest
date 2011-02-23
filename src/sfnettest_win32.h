@@ -1,5 +1,16 @@
-#ifndef __NETTEST_UNIX_H__
-#define __NETTEST_UNIX_H__
+/**************************************************************************\
+*    Filename: sfnettest_win32.c
+*      Author: David Riddoch <driddoch@solarflare.com>
+* Description: Compatibility layer for _WIN32 API.
+*   Copyright: (C) 2005-2011 Solarflare Communications Inc.
+*
+* This program is free software; you can redistribute it and/or modify it
+* under the terms of the GNU General Public License version 2 as published
+* by the Free Software Foundation, incorporated herein by reference.
+\**************************************************************************/
+
+#ifndef __NETTEST_WIN32_H__
+#define __NETTEST_WIN32_H__
 
 
 #define NT_HAVE_POLL    0
@@ -25,4 +36,4 @@ static __inline ssize_t __nt_recv(int fd, void* buf, size_t len, int flags)
 #define recv __nt_recv
 
 
-#endif  /* __NETTEST_UNIX_H__ */
+#endif  /* __NETTEST_WIN32_H__ */
