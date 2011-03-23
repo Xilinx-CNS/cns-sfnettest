@@ -32,6 +32,10 @@ NETTEST_SRCS	:= sfnt_sysinfo	\
 
 libsfnettest.a: $(NETTEST_SRCS:%=%.o)
 
+# This file needs -fPIC due to the dynamic symbol magic it uses to detect
+# the presence/version of OpenOnload.
+sfnt_sysinfo.o: CFLAGS += -fPIC
+
 sfnt-pingpong: LIBS := -L. -lsfnettest -lm
 sfnt-pingpong: libsfnettest.a
 
