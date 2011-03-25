@@ -21,7 +21,7 @@ static const char* cfg_muxer;
 static const char* cfg_smuxer;
 static int         cfg_rtt;
 static const char* cfg_raw;
-static int         cfg_percentile = 99;
+static float       cfg_percentile = 99;
 static int         cfg_minmsg;
 static int         cfg_maxmsg;
 static int         cfg_minms = 1000;
@@ -52,7 +52,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
                                                "(same as client by default)"},
   {   0, "rtt",      NT_CLO_FLAG, &cfg_rtt,    "report round-trip-time"      },
   {   0, "raw",      NT_CLO_STR,  &cfg_raw,    "dump raw results to files"   },
-  {   0, "percentile",NT_CLO_UINT,&cfg_percentile,"percentile"               },
+  {   0, "percentile",NT_CLO_FLOAT,&cfg_percentile,"percentile"              },
   {   0, "minmsg",   NT_CLO_INT,  &cfg_minmsg, "min message size"            },
   {   0, "maxmsg",   NT_CLO_INT,  &cfg_maxmsg, "max message size"            },
   {   0, "minms",    NT_CLO_INT,  &cfg_minms,  "min time per msg size (ms)"  },
@@ -655,7 +655,7 @@ static void get_stats(struct stats* s, int* results, int results_n)
   sfnt_iarray_mean_and_limits(results, results_end, &s->mean, &s->min, &s->max);
 
   s->median = results[results_n >> 1u];
-  s->percentile = results[results_n * cfg_percentile / 100];
+  s->percentile = results[(int) (results_n * cfg_percentile / 100)];
   sfnt_iarray_variance(results, results_end, s->mean, &variance);
   s->stddev = (int) sqrt((double) variance);
 }
@@ -954,11 +954,11 @@ static int do_client2(int ss, const char* hostport, int local)
          cfg_miniter, cfg_maxiter, cfg_minms, cfg_maxms);
   printf("# multicast=%s loop=%d\n",
          cfg_mcast ? cfg_mcast : "NO", cfg_mcast_loop);
+  printf("# percentile=%g\n", (double) cfg_percentile);
   printf("# server_onload=%d\n", server_onload);
   sfnt_onload_info_dump(stdout, "# ");
   printf("#\n");
-  printf("#\tsize\tmean\tmin\tmedian\tmax\t%d%%ile\tstddev\titer\n",
-         cfg_percentile);
+  printf("#\tsize\tmean\tmin\tmedian\tmax\t%%ile\tstddev\titer\n");
 
   if( fd_type & FDTF_STREAM ) {
     if( cfg_minmsg == 0 )

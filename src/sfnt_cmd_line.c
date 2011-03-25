@@ -274,7 +274,8 @@ static int parse_cfg_opt(int argc, char** argv, const char* context)
       bad_cla(context, argv[0], "expected integer");
     break;
   case NT_CLO_UINT:
-    if( !val || sscanf(val, "%i", (int*) a->value) != 1 )
+    if( !val || sscanf(val, "%i", (int*) a->value) != 1 ||
+        *((int*) a->value) < 0 )
       bad_cla(context, argv[0], "expected unsigned integer");
     break;
   case NT_CLO_INT64:
@@ -282,8 +283,13 @@ static int parse_cfg_opt(int argc, char** argv, const char* context)
       bad_cla(context, argv[0], "expected 64bit integer");
     break;
   case NT_CLO_UINT64:
-    if( !val || sscanf(val, "%lli", (long long int*) a->value) != 1 )
+    if( !val || sscanf(val, "%lli", (long long int*) a->value) != 1 ||
+        *((long long int*) a->value) < 0 )
       bad_cla(context, argv[0], "expected unsigned 64bit integer");
+    break;
+  case NT_CLO_FLOAT:
+    if( !val || sscanf(val, "%f", (float*) a->value) != 1 )
+      bad_cla(context, argv[0], "expected number");
     break;
   case NT_CLO_STR:
     *(const char**) a->value = val ? val : "";

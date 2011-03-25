@@ -52,6 +52,7 @@ struct sfnt_cmd_line_opt {
 # define NT_CLO_IRANGE 7
 # define NT_CLO_INT64  8
 # define NT_CLO_UINT64 9
+# define NT_CLO_FLOAT  10
   void*        value;
   const char*  usage;
   void       (*fn)(const char*, const struct sfnt_cmd_line_opt*);
