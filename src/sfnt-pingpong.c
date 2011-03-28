@@ -34,6 +34,8 @@ static const char* cfg_mcast_intf;
 static int         cfg_mcast_loop;
 static const char* cfg_bindtodev;
 static unsigned    cfg_n_pipe;
+static unsigned    cfg_n_unixd;
+static unsigned    cfg_n_unixs;
 static unsigned    cfg_n_udp;
 static unsigned    cfg_n_tcpc;
 static unsigned    cfg_n_tcpl;
@@ -65,6 +67,8 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   {   0, "bindtodev",NT_CLO_STR,  &cfg_bindtodev, "SO_BINDTODEVICE"          },
   {   0, "forkboth", NT_CLO_FLAG, &cfg_forkboth,"fork client and server"     },
   {   0, "n-pipe",   NT_CLO_UINT, &cfg_n_pipe, "include pipes in fd set"     },
+  {   0, "n-unix-d", NT_CLO_UINT, &cfg_n_unixd,"include unix dgram in fd set"},
+  {   0, "n-unix-s", NT_CLO_UINT, &cfg_n_unixs,"include unix strm in fd set" },
   {   0, "n-udp",    NT_CLO_UINT, &cfg_n_udp,  "include UDP socks in fd set" },
   {   0, "n-tcpc",   NT_CLO_UINT, &cfg_n_tcpc, "include TCP socks in fd set" },
   {   0, "n-tcpl",   NT_CLO_UINT, &cfg_n_tcpl, "include TCP listeners in fds"},
@@ -430,6 +434,20 @@ static void add_fds(int us)
        * doing it this way is we don't waste file descriptors.
        */
       mux_add(pfd[1]);
+  }
+  for( i = 0; i < cfg_n_unixd; ++i ) {
+    int fds[2];
+    NT_TEST(socketpair(PF_UNIX, SOCK_DGRAM, 0, fds) == 0);
+    mux_add(fds[0]);
+    if( ++i < cfg_n_unixd )
+      mux_add(fds[1]);
+  }
+  for( i = 0; i < cfg_n_unixs; ++i ) {
+    int fds[2];
+    NT_TEST(socketpair(PF_UNIX, SOCK_STREAM, 0, fds) == 0);
+    mux_add(fds[0]);
+    if( ++i < cfg_n_unixs )
+      mux_add(fds[1]);
   }
 #endif
   for( i = 0; i < cfg_n_udp; ++i ) {
