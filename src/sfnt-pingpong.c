@@ -43,6 +43,9 @@ static const char* cfg_tcpc_serv;
 static unsigned    cfg_mcast_sleep = 2;
 static unsigned    cfg_timeout;
 static const char* cfg_affinity;
+static int         cfg_n_pings = 1;
+static int         cfg_n_pongs = 1;
+static int         cfg_nodelay;
 
 static struct sfnt_cmd_line_opt cfg_opts[] = {
   {   0, "port",     NT_CLO_UINT, &cfg_port,   "server port#"                },
@@ -75,6 +78,9 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   {   0, "tcpc-serv",NT_CLO_STR,  &cfg_tcpc_serv,"host:port for tcp conns"   },
   {   0, "timeout",  NT_CLO_UINT, &cfg_timeout,"socket SND?RECV timeout"     },
   {   0, "affinity", NT_CLO_STR,  &cfg_affinity,"<client-core>,<server-core>"},
+  {   0, "n-pings",  NT_CLO_UINT, &cfg_n_pings, "number of ping messages"    },
+  {   0, "n-pongs",  NT_CLO_UINT, &cfg_n_pongs, "number of pong messages"    },
+  {   0, "nodelay",  NT_CLO_FLAG, &cfg_nodelay, "enable TCP_NODELAY"         },
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
@@ -398,21 +404,29 @@ static void do_init(void)
 
 static void do_ping(int read_fd, int write_fd, int sz)
 {
-  int rc;
-  rc = do_send(write_fd, ppbuf, sz, 0);
-  NT_TESTi3(rc, ==, sz);
-  rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
-  NT_TESTi3(rc, ==, sz);
+  int i, rc;
+  for( i = 0; i < cfg_n_pings; ++i ) {
+    rc = do_send(write_fd, ppbuf, sz, 0);
+    NT_TESTi3(rc, ==, sz);
+  }
+  for( i = 0; i < cfg_n_pongs; ++i ) {
+    rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
+    NT_TESTi3(rc, ==, sz);
+  }
 }
 
 
 static void do_pong(int read_fd, int write_fd, int sz)
 {
-  int rc;
-  rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
-  NT_TESTi3(rc, ==, sz);
-  rc = do_send(write_fd, ppbuf, sz, 0);
-  NT_TESTi3(rc, ==, sz);
+  int i, rc;
+  for( i = 0; i < cfg_n_pings; ++i ) {
+    rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
+    NT_TESTi3(rc, ==, sz);
+  }
+  for( i = 0; i < cfg_n_pongs; ++i ) {
+    rc = do_send(write_fd, ppbuf, sz, 0);
+    NT_TESTi3(rc, ==, sz);
+  }
 }
 
 
@@ -577,6 +591,9 @@ static int do_server2(int ss)
   cfg_n_tcpc = sfnt_sock_get_int(ss);
   cfg_n_tcpl = sfnt_sock_get_int(ss);
   affinity_core_i = sfnt_sock_get_int(ss);
+  cfg_n_pings = sfnt_sock_get_int(ss);
+  cfg_n_pongs = sfnt_sock_get_int(ss);
+  cfg_nodelay = sfnt_sock_get_int(ss);
   sfnt_sock_put_int(ss, sfnt_onload_is_active());
 
   /* Init after we've received config opts from client. */
@@ -767,6 +784,9 @@ static void send_opts_to_server(int ss, int server_core_i)
   sfnt_sock_put_int(ss, cfg_n_tcpc);
   sfnt_sock_put_int(ss, cfg_n_tcpl);
   sfnt_sock_put_int(ss, server_core_i);
+  sfnt_sock_put_int(ss, cfg_n_pings);
+  sfnt_sock_put_int(ss, cfg_n_pongs);
+  sfnt_sock_put_int(ss, cfg_nodelay);
 }
 
 
@@ -877,6 +897,7 @@ static int do_client2(int ss, const char* hostport, int local)
   int msg_size;
   int* results;
   int* affinity;
+  int one = 1;
   int rc;
 
   /* Ensure the other end is identical. */
@@ -931,6 +952,8 @@ static int do_client2(int ss, const char* hostport, int local)
       *p = '\0';
     int port = sfnt_sock_get_int(ss);
     NT_TRY2(read_fd, socket(PF_INET, SOCK_STREAM, 0));
+    if( cfg_nodelay )
+      NT_TRY(setsockopt(read_fd, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
     NT_TRY(sfnt_connect(read_fd, host, port));
     write_fd = read_fd;
     break;
