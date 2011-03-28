@@ -75,11 +75,11 @@ extern void sfnt_app_getopt(const char* usage, int* argc, char* argv[],
                           const struct sfnt_cmd_line_opt*, int how_many);
 
 /* Print usage message to stderr and exit with error status. */
-extern void sfnt_fail_usage(const char* err_msg);
+extern void sfnt_fail_usage(const char* err_msg, ...) NT_PRINTF_LIKE(1,2);
 
 #if 0  /*??*/
 /* Replace the usage function. */
-extern void sfnt_usage_fn_set(void (*fn)(FILE*, const char* err_msg));
+extern void sfnt_usage_fn_set(void (*fn)(FILE*, const char*, ...));
 #endif
 
 

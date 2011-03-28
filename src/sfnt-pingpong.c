@@ -932,7 +932,8 @@ static int do_client2(int ss, const char* hostport, int local)
       strcasecmp(cfg_affinity, "none") ) {
     rc = sfnt_parse_int_list(cfg_affinity, &affinity, &affinity_len);
     if( rc != 0 || affinity_len != 2 )
-      sfnt_fail_usage("ERROR: Bad --affinity option");
+      sfnt_fail_usage("ERROR: Bad --affinity option (rc=%d len=%d)",
+                      rc, affinity_len);
     affinity_core_i = affinity[0];
     server_core_i = affinity[1];
   }

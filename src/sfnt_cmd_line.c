@@ -152,11 +152,12 @@ void sfnt_opt_usage(FILE* f, const struct sfnt_cmd_line_opt* opts, int n_opts)
 }
 
 
-static void sfnt_usage_fn_default(FILE* f, const char* msg)
+static void sfnt_usage_fn_default(FILE* f, const char* fmt, va_list args)
 {
-  if( msg ) {
+  if( fmt != NULL ) {
     sfnt_flog(f, "\n");
-    sfnt_flog(f, "%s\n", msg);
+    sfnt_vflog(f, fmt, args);
+    sfnt_flog(f, "\n");
   }
   sfnt_flog(f, "\n");
   sfnt_flog(f, "usage:\n");
@@ -173,12 +174,25 @@ static void sfnt_usage_fn_default(FILE* f, const char* msg)
 }
 
 
-static void (*sfnt_usage_fn)(FILE*, const char*) = sfnt_usage_fn_default;
+static void (*sfnt_usage_fn)(FILE*, const char*, va_list)
+  = sfnt_usage_fn_default;
 
 
-void sfnt_fail_usage(const char* err_msg)
+static void sfnt_usage(FILE* file, const char* fmt, ...)
 {
-  sfnt_usage_fn(stderr, err_msg);
+  va_list args;
+  va_start(args, fmt);
+  sfnt_usage_fn(file, fmt, args);
+  va_end(args);
+}
+
+
+void sfnt_fail_usage(const char* fmt, ...)
+{
+  va_list args;
+  va_start(args, fmt);
+  sfnt_usage_fn(stderr, fmt, args);
+  va_end(args);
   exit(1);
 }
 
@@ -295,7 +309,7 @@ static int parse_cfg_opt(int argc, char** argv, const char* context)
     *(const char**) a->value = val ? val : "";
     break;
   case NT_CLO_USAGE:
-    sfnt_usage_fn(stdout, NULL);
+    sfnt_usage(stdout, NULL);
     exit(0);
     break;
   case NT_CLO_FN:
