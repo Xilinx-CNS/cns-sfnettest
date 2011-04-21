@@ -587,6 +587,8 @@ static int do_server2(int ss)
   cfg_muxer = sfnt_sock_get_str(ss);
   cfg_mcast_loop = sfnt_sock_get_int(ss);
   cfg_n_pipe = sfnt_sock_get_int(ss);
+  cfg_n_unixs = sfnt_sock_get_int(ss);
+  cfg_n_unixd = sfnt_sock_get_int(ss);
   cfg_n_udp = sfnt_sock_get_int(ss);
   cfg_n_tcpc = sfnt_sock_get_int(ss);
   cfg_n_tcpl = sfnt_sock_get_int(ss);
@@ -780,6 +782,8 @@ static void send_opts_to_server(int ss, int server_core_i)
   sfnt_sock_put_str(ss, cfg_smuxer ? cfg_smuxer : cfg_muxer);
   sfnt_sock_put_int(ss, cfg_mcast_loop);
   sfnt_sock_put_int(ss, cfg_n_pipe);
+  sfnt_sock_put_int(ss, cfg_n_unixs);
+  sfnt_sock_put_int(ss, cfg_n_unixd);
   sfnt_sock_put_int(ss, cfg_n_udp);
   sfnt_sock_put_int(ss, cfg_n_tcpc);
   sfnt_sock_put_int(ss, cfg_n_tcpl);
