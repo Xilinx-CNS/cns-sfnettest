@@ -46,6 +46,7 @@ static const char* cfg_affinity;
 static int         cfg_n_pings = 1;
 static int         cfg_n_pongs = 1;
 static int         cfg_nodelay;
+static int         cfg_quickack;
 
 static struct sfnt_cmd_line_opt cfg_opts[] = {
   {   0, "port",     NT_CLO_UINT, &cfg_port,   "server port#"                },
@@ -81,6 +82,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   {   0, "n-pings",  NT_CLO_UINT, &cfg_n_pings, "number of ping messages"    },
   {   0, "n-pongs",  NT_CLO_UINT, &cfg_n_pongs, "number of pong messages"    },
   {   0, "nodelay",  NT_CLO_FLAG, &cfg_nodelay, "enable TCP_NODELAY"         },
+  {   0, "quickack", NT_CLO_FLAG, &cfg_quickack,"enable TCP_QUICKACK"        },
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
@@ -404,24 +406,42 @@ static void do_init(void)
 
 static void do_ping(int read_fd, int write_fd, int sz)
 {
-  int i, rc;
+  int i, rc, one = 1;
   for( i = 0; i < cfg_n_pings; ++i ) {
     rc = do_send(write_fd, ppbuf, sz, 0);
     NT_TESTi3(rc, ==, sz);
   }
-  for( i = 0; i < cfg_n_pongs; ++i ) {
-    rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
-    NT_TESTi3(rc, ==, sz);
+  if( cfg_quickack && (fd_type == FDT_TCP) ) {
+    for( i = 0; i < cfg_n_pongs; ++i ) {
+      rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
+      NT_TESTi3(rc, ==, sz);
+      NT_TRY(setsockopt(read_fd, SOL_TCP, TCP_QUICKACK, &one, sizeof(one)));
+    }
+  }
+  else {
+    for( i = 0; i < cfg_n_pongs; ++i ) {
+      rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
+      NT_TESTi3(rc, ==, sz);
+    }
   }
 }
 
 
 static void do_pong(int read_fd, int write_fd, int sz)
 {
-  int i, rc;
-  for( i = 0; i < cfg_n_pings; ++i ) {
-    rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
-    NT_TESTi3(rc, ==, sz);
+  int i, rc, one = 1;
+  if( cfg_quickack && (fd_type == FDT_TCP) ) {
+    for( i = 0; i < cfg_n_pings; ++i ) {
+      rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
+      NT_TESTi3(rc, ==, sz);
+      NT_TRY(setsockopt(read_fd, SOL_TCP, TCP_QUICKACK, &one, sizeof(one)));
+    }
+  }
+  else {
+    for( i = 0; i < cfg_n_pings; ++i ) {
+      rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
+      NT_TESTi3(rc, ==, sz);
+    }
   }
   for( i = 0; i < cfg_n_pongs; ++i ) {
     rc = do_send(write_fd, ppbuf, sz, 0);
@@ -596,6 +616,7 @@ static int do_server2(int ss)
   cfg_n_pings = sfnt_sock_get_int(ss);
   cfg_n_pongs = sfnt_sock_get_int(ss);
   cfg_nodelay = sfnt_sock_get_int(ss);
+  cfg_quickack = sfnt_sock_get_int(ss);
   sfnt_sock_put_int(ss, sfnt_onload_is_active());
 
   /* Init after we've received config opts from client. */
@@ -606,6 +627,7 @@ static int do_server2(int ss)
   case FDT_TCP: {
     struct sockaddr_in sa;
     socklen_t sa_len = sizeof(sa);
+    int one = 1;
     NT_TRY2(sl, socket(PF_INET, SOCK_STREAM, 0));
     if( cfg_bindtodev )
       NT_TRY(sfnt_so_bindtodevice(sl, cfg_bindtodev));
@@ -614,6 +636,8 @@ static int do_server2(int ss)
     sfnt_sock_put_int(ss, ntohs(sa.sin_port));
     NT_TRY2(read_fd, accept(sl, NULL, NULL));
     write_fd = read_fd;
+    if( cfg_nodelay )
+      NT_TRY(setsockopt(write_fd, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
     close(sl);
     sl = -1;
     break;
@@ -791,6 +815,7 @@ static void send_opts_to_server(int ss, int server_core_i)
   sfnt_sock_put_int(ss, cfg_n_pings);
   sfnt_sock_put_int(ss, cfg_n_pongs);
   sfnt_sock_put_int(ss, cfg_nodelay);
+  sfnt_sock_put_int(ss, cfg_quickack);
 }
 
 
