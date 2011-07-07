@@ -135,16 +135,25 @@ int sfnt_sock_get_int(int fd)
 
 void  sfnt_sock_put_str(int fd, const char* str)
 {
-  int len = strlen(str) + 1;
-  sfnt_sock_put_int(fd, len);
-  NT_TEST(send(fd, str, len, 0) == len);
+  if( str != NULL ) {
+    int len = strlen(str) + 1;
+    sfnt_sock_put_int(fd, len);
+    NT_TEST(send(fd, str, len, 0) == len);
+  }
+  else {
+    sfnt_sock_put_int(fd, 0);
+  }
 }
 
 
 char* sfnt_sock_get_str(int fd)
 {
+  char* str;
   int len = sfnt_sock_get_int(fd);
-  char* str = malloc(len);
+  if( len == 0 )
+    return NULL;
+  NT_TEST(len > 0);
+  str = malloc(len);
   NT_TEST(recv(fd, str, len, MSG_WAITALL) == len);
   NT_TEST(str[len - 1] == '\0');
   return str;

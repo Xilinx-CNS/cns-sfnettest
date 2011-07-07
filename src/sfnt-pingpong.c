@@ -577,6 +577,7 @@ static int do_server2(int ss)
 {
   int sl, iter, msg_size;
   int read_fd, write_fd;
+  char* s;
 
   sfnt_sock_put_str(ss, SFNT_VERSION);
   sfnt_sock_put_str(ss, SFNT_SRC_CSUM);
@@ -585,6 +586,10 @@ static int do_server2(int ss)
   cfg_connect = sfnt_sock_get_int(ss);
   cfg_spin = sfnt_sock_get_int(ss);
   cfg_muxer = sfnt_sock_get_str(ss);
+  cfg_mcast = sfnt_sock_get_str(ss);
+  s = sfnt_sock_get_str(ss);
+  if( cfg_mcast_intf == NULL )
+    cfg_mcast_intf = s;
   cfg_mcast_loop = sfnt_sock_get_int(ss);
   cfg_n_pipe = sfnt_sock_get_int(ss);
   cfg_n_unixs = sfnt_sock_get_int(ss);
@@ -780,6 +785,8 @@ static void send_opts_to_server(int ss, int server_core_i)
   sfnt_sock_put_int(ss, cfg_connect);
   sfnt_sock_put_int(ss, cfg_spin);
   sfnt_sock_put_str(ss, cfg_smuxer ? cfg_smuxer : cfg_muxer);
+  sfnt_sock_put_str(ss, cfg_mcast);
+  sfnt_sock_put_str(ss, cfg_mcast_intf);
   sfnt_sock_put_int(ss, cfg_mcast_loop);
   sfnt_sock_put_int(ss, cfg_n_pipe);
   sfnt_sock_put_int(ss, cfg_n_unixs);
