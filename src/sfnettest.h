@@ -161,6 +161,9 @@ do {                                                    \
  * Information about the test environment.
  */
 
+/* Dump sfnettest version info. */
+extern void sfnt_dump_ver_info(FILE* f, const char* prefix);
+
 /* Dump generic information about the test environment.
  *
  * [tsc_opt] can be NULL.

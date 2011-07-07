@@ -41,11 +41,15 @@ $(APPS): libsfnettest.a
 
 
 # TODO: Make this stuff VPATH friendly.
+SFNT_SRC_CSUM	:= $(shell cat *.c *.h | md5sum | sed 's/ .*//')
 sinclude version.mk
 ifeq ($(SFNT_VERSION),)
 SFNT_VERSION	:= $(shell hg id --id 2>/dev/null || echo no-version)
+else
+ifneq ($(SFNT_RELEASE_CSUM),$(SFNT_SRC_CSUM))
+SFNT_VERSION	:= $(SFNT_VERSION)-modified
 endif
-SFNT_SRC_CSUM	:= $(shell cat *.c *.h | md5sum | sed 's/ .*//')
+endif
 CPPFLAGS	+= -DSFNT_VERSION='"$(SFNT_VERSION)"'
 CPPFLAGS	+= -DSFNT_SRC_CSUM='"$(SFNT_SRC_CSUM)"'
 

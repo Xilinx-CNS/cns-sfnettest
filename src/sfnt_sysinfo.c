@@ -12,7 +12,14 @@
 #include "sfnettest.h"
 
 
-void sfnt_dump_sys_info(const struct sfnt_tsc_params* tsc)
+void sfnt_dump_ver_info(FILE* f, const char* pf)
+{
+  sfnt_flog(f, "%sversion: %s\n", pf, SFNT_VERSION);
+  sfnt_flog(f, "%ssrc: %s\n", pf, SFNT_SRC_CSUM);
+}
+
+
+void sfnt_dump_sys_info(const struct sfnt_tsc_params* tsc_opt)
 {
 #ifndef _WIN32
   const char* ld_preload;
@@ -20,17 +27,16 @@ void sfnt_dump_sys_info(const struct sfnt_tsc_params* tsc)
 
   if( sfnt_cmd_line )
     sfnt_out("# cmdline: %s\n", sfnt_cmd_line);
-  sfnt_out("# version: %s\n", SFNT_VERSION);
-  sfnt_out("# src: %s\n", SFNT_SRC_CSUM);
+  sfnt_dump_ver_info(stdout, "# ");
   rc = system("date | sed 's/^/# date: /'");
   rc = system("uname -a | sed 's/^/# uname: /'");
   rc = system("cat /proc/cpuinfo | grep 'model name'"
               " | head -1 | sed 's/^/# cpu: /'");
   rc = system("lspci -d 1924: | sed 's/^/# sfnics: /'");
   rc = system("grep MemTotal /proc/meminfo | sed 's/^/# ram: /'");
-  sfnt_out("# tsc_hz: %"PRId64"\n", tsc->hz);
-  ld_preload = getenv("LD_PRELOAD");
-  if( ld_preload )
+  if( tsc_opt != NULL )
+    sfnt_out("# tsc_hz: %"PRId64"\n", tsc_opt->hz);
+  if( (ld_preload = getenv("LD_PRELOAD")) )
     sfnt_out("# LD_PRELOAD=%s\n", ld_preload);
 #endif
 }
@@ -69,10 +75,10 @@ void sfnt_onload_info_dump(FILE* f, const char* pf)
   char** p;
 
   if( &onload_version )
-    fprintf(f, "%sonload_version=%s\n", pf, onload_version);
+    sfnt_flog(f, "%sonload_version=%s\n", pf, onload_version);
   if( sfnt_onload_is_active() )
     for( p = environ; *p != NULL; ++p )
       if( strncmp("EF_", *p, 3) == 0 )
-        fprintf(f, "%s%s\n", pf, *p);
+        sfnt_flog(f, "%s%s\n", pf, *p);
 #endif
 }

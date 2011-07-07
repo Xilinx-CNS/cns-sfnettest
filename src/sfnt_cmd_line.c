@@ -17,6 +17,7 @@ char*       sfnt_cmd_line;
 
 int         sfnt_quiet;
 int         sfnt_verbose;
+static int  sfnt_version;
 
 static const struct sfnt_cmd_line_opt* cmd_line_opts;
 static int                             cmd_line_opts_n;
@@ -28,9 +29,10 @@ static void parse_cfg_string(char* s);
 
 
 static struct sfnt_cmd_line_opt std_opts[] = {
-  { '?', "help",     NT_CLO_USAGE, 0,             "this message"        },
-  { 'q', "quiet",    NT_CLO_FLAG, &sfnt_quiet,    "quiet"               },
-  { 'v', "verbose",  NT_CLO_FLAG, &sfnt_verbose,  "verbose"             },
+  { '?', "help",     NT_CLO_USAGE, 0,             "this message"           },
+  { 'q', "quiet",    NT_CLO_FLAG, &sfnt_quiet,    "quiet"                  },
+  { 'v', "verbose",  NT_CLO_FLAG, &sfnt_verbose,  "verbose"                },
+  {   0, "version",  NT_CLO_FLAG, &sfnt_version,  "print version and exit" },
 #if 0 /*??*/
   {   0, "hang",     NT_CLO_FLAG, &ci_cfg_hang_on_fail,
       "hang on failure" },
@@ -47,7 +49,7 @@ static struct sfnt_cmd_line_opt std_opts[] = {
 #define N_STD_OPTS  (sizeof(std_opts) / sizeof(std_opts[0]))
 
 
-void sfnt_app_startup(int argc, char* argv[])
+static void sfnt_app_startup(int argc, char* argv[])
 {
   if( sfnt_app_name )
     return;
@@ -107,7 +109,8 @@ void sfnt_app_getopt(const char* usage, int* argc, char* argv[],
   usage_str = usage;
 
   /* look in the environment first */
-  if( (s = getenv("CI_OPTS")) )  parse_cfg_string(s);
+  if( (s = getenv("SFNT_OPTS")) )
+    parse_cfg_string(s);
 
   if( argc ) {
     --(*argc);  ++argv;
@@ -131,6 +134,11 @@ void sfnt_app_getopt(const char* usage, int* argc, char* argv[],
   if( ci_cfg_abort_on_fail )  ci_fail_stop_fn = ci_fail_abort;
 # endif
 #endif
+
+  if( sfnt_version ) {
+    sfnt_dump_ver_info(stdout, "");
+    exit(0);
+  }
 }
 
 
