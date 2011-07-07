@@ -15,9 +15,30 @@
 #endif
 
 
-int sfnt_getaddrinfo(const char* host, const char* port, struct addrinfo**ai_out)
+int sfnt_getaddrinfo(const char* host, const char* port, int port_i,
+                     struct addrinfo** ai_out)
 {
   struct addrinfo hints;
+  char str[256];
+
+  if( port == NULL ) {
+    if( port_i >= 0 ) {
+      sprintf(str, "%d", port_i);
+      port = str;
+    }
+    else if( (port = strrchr(host, ':')) != NULL ) {
+      NT_ASSERT(sizeof(str) > (port - host));
+      strncpy(str, host, sizeof(str));
+      host = str;
+      strrchr(host, ':')[0] = '\0';
+      ++port;
+    }
+    else {
+      sprintf(str, "0");
+      port = str;
+    }
+  }
+
   hints.ai_flags = AI_NUMERICSERV;
   hints.ai_family = AF_INET;
   hints.ai_socktype = 0;
@@ -40,21 +61,29 @@ int sfnt_bind_port(int sock, int port)
 }
 
 
-int sfnt_connect(int sock, const char* hostport, int default_port)
+int sfnt_bind(int sock, const char* host_or_hostport,
+              const char* port_or_null, int port_i_or_neg)
 {
   struct addrinfo* ai;
-  char host[256];
-  char* port;
   int rc;
 
-  NT_ASSERT(strlen(hostport) < sizeof(host) - 20);
-  strcpy(host, hostport);
-  if( (port = strchr(host, ':')) == NULL )
-    sprintf((port = host + strlen(host)), ":%d", default_port);
-  *port = '\0';
-  ++port;
+  if( (rc = sfnt_getaddrinfo(host_or_hostport, port_or_null,
+                             port_i_or_neg, &ai)) < 0 )
+    return rc;
+  rc = bind(sock, ai->ai_addr, ai->ai_addrlen);
+  freeaddrinfo(ai);
+  return rc;
+}
 
-  if( (rc = sfnt_getaddrinfo(host, port, &ai)) < 0 )
+
+int sfnt_connect(int sock, const char* host_or_hostport,
+                 const char* port_or_null, int port_i_or_neg)
+{
+  struct addrinfo* ai;
+  int rc;
+
+  if( (rc = sfnt_getaddrinfo(host_or_hostport, port_or_null,
+                             port_i_or_neg, &ai)) < 0 )
     return rc;
   rc = connect(sock, ai->ai_addr, ai->ai_addrlen);
   freeaddrinfo(ai);
@@ -82,7 +111,7 @@ int sfnt_ip_multicast_if(int sock, const char* intf)
   if( (rc = if_nametoindex(intf)) != 0 ) {
     r.imr_ifindex = rc;
   }
-  else if( (rc = sfnt_getaddrinfo(intf, NULL, &ai)) == 0 ) {
+  else if( (rc = sfnt_getaddrinfo(intf, NULL, 0, &ai)) == 0 ) {
     r.imr_address = ((struct sockaddr_in*) ai->ai_addr)->sin_addr;
     freeaddrinfo(ai);
   }
@@ -106,7 +135,7 @@ int sfnt_ip_add_membership(int sock, in_addr_t mcast_addr, const char* intf)
     if( (rc = if_nametoindex(intf)) != 0 ) {
       r.imr_ifindex = rc;
     }
-    else if( (rc = sfnt_getaddrinfo(intf, NULL, &ai)) == 0 ) {
+    else if( (rc = sfnt_getaddrinfo(intf, NULL, 0, &ai)) == 0 ) {
       r.imr_address = ((struct sockaddr_in*) ai->ai_addr)->sin_addr;
       freeaddrinfo(ai);
     }

@@ -248,12 +248,26 @@ extern int sfnt_epoll_wait(int epfd, struct epoll_event* events,
  * Socket convenience functions.
  */
 
-extern int sfnt_getaddrinfo(const char* host, const char* port,
-                          struct addrinfo**ai_out);
+/* Calls getaddrinfo().
+ *
+ * Port is determined as follows: Use [port_or_null] unless it is NULL.
+ * Otherwise use [port_i_or_neg] unless it is negative.  Otherwise if
+ * [host_or_hostport] has a ":port" suffix than that is used as the port.
+ * Otherwise the port is 0.
+ */
+extern int sfnt_getaddrinfo(const char* host_or_hostport,
+                            const char* port_or_null, int port_i_or_neg,
+                            struct addrinfo**ai_out);
 
 extern int sfnt_bind_port(int sock, int port);
 
-extern int sfnt_connect(int sock, const char* hostport, int default_port);
+/* Port selected as for sfnt_getaddrinfo(). */
+extern int sfnt_bind(int sock, const char* host_or_hostport,
+                     const char* port_or_null, int port_i_or_neg);
+
+/* Port selected as for sfnt_getaddrinfo(). */
+extern int sfnt_connect(int sock, const char* host_or_hostport,
+                        const char* port_or_null, int port_i_or_neg);
 
 /* Set the SO_BINDTODEVICE socket option.  [intf] must be an interface name
  * (eg. "eth3").

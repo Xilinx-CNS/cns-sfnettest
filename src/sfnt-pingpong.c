@@ -470,7 +470,7 @@ static void add_fds(int us)
   }
   for( i = 0; i < cfg_n_tcpc; ++i ) {
     NT_TRY2(sock, socket(PF_INET, SOCK_STREAM, 0));
-    NT_TRY(sfnt_connect(sock, cfg_tcpc_serv, 0));
+    NT_TRY(sfnt_connect(sock, cfg_tcpc_serv, NULL, -1));
     mux_add(sock);
   }
   for( i = 0; i < cfg_n_tcpl; ++i ) {
@@ -805,8 +805,10 @@ static int try_connect(int sock, const char* hostport, int default_port)
 {
   int max_attempts = 100;
   int rc, n_attempts = 0;
+  if( strchr(hostport, ':') != NULL )
+    default_port = -1;
   while( 1 ) {
-    rc = sfnt_connect(sock, hostport, default_port);
+    rc = sfnt_connect(sock, hostport, NULL, default_port);
     if( rc == 0 || ++n_attempts == max_attempts || errno != ECONNREFUSED )
       return rc;
     if( n_attempts == 1 && ! sfnt_quiet )
@@ -966,7 +968,7 @@ static int do_client2(int ss, const char* hostport, int local)
     NT_TRY2(read_fd, socket(PF_INET, SOCK_STREAM, 0));
     if( cfg_nodelay )
       NT_TRY(setsockopt(read_fd, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
-    NT_TRY(sfnt_connect(read_fd, host, port));
+    NT_TRY(sfnt_connect(read_fd, host, NULL, port));
     write_fd = read_fd;
     break;
   }
