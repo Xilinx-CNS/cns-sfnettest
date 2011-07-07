@@ -481,6 +481,78 @@ static void add_fds(int us)
 }
 
 
+static void client_check_ver(int ss)
+{
+  char* serv_ver = sfnt_sock_get_str(ss);
+  char* serv_csum = sfnt_sock_get_str(ss);
+  if( strcmp(serv_ver, SFNT_VERSION) ) {
+    sfnt_err("ERROR: Version mismatch: client=%s server=%s\n",
+             SFNT_VERSION, serv_ver);
+    sfnt_fail_test();
+  }
+  if( strcmp(serv_csum, SFNT_SRC_CSUM) ) {
+    sfnt_err("ERROR: Source Checksum mismatch:\n");
+    sfnt_err("ERROR:     me=%s\n", SFNT_SRC_CSUM);
+    sfnt_err("ERROR: server=%s\n", serv_csum);
+    sfnt_fail_test();
+  }
+}
+
+
+static void server_check_ver(int ss)
+{
+  sfnt_sock_put_str(ss, SFNT_VERSION);
+  sfnt_sock_put_str(ss, SFNT_SRC_CSUM);
+}
+
+
+static void client_send_opts(int ss, int server_core_i)
+{
+  sfnt_sock_put_int(ss, fd_type);
+  sfnt_sock_put_int(ss, cfg_connect);
+  sfnt_sock_put_int(ss, cfg_spin);
+  sfnt_sock_put_str(ss, cfg_smuxer ? cfg_smuxer : cfg_muxer);
+  sfnt_sock_put_str(ss, cfg_mcast);
+  sfnt_sock_put_str(ss, cfg_mcast_intf);
+  sfnt_sock_put_int(ss, cfg_mcast_loop);
+  sfnt_sock_put_int(ss, cfg_n_pipe);
+  sfnt_sock_put_int(ss, cfg_n_unixs);
+  sfnt_sock_put_int(ss, cfg_n_unixd);
+  sfnt_sock_put_int(ss, cfg_n_udp);
+  sfnt_sock_put_int(ss, cfg_n_tcpc);
+  sfnt_sock_put_int(ss, cfg_n_tcpl);
+  sfnt_sock_put_int(ss, server_core_i);
+  sfnt_sock_put_int(ss, cfg_n_pings);
+  sfnt_sock_put_int(ss, cfg_n_pongs);
+  sfnt_sock_put_int(ss, cfg_nodelay);
+}
+
+
+static void server_recv_opts(int ss)
+{
+  char* s;
+  fd_type = sfnt_sock_get_int(ss);
+  cfg_connect = sfnt_sock_get_int(ss);
+  cfg_spin = sfnt_sock_get_int(ss);
+  cfg_muxer = sfnt_sock_get_str(ss);
+  cfg_mcast = sfnt_sock_get_str(ss);
+  s = sfnt_sock_get_str(ss);
+  if( cfg_mcast_intf == NULL )
+    cfg_mcast_intf = s;
+  cfg_mcast_loop = sfnt_sock_get_int(ss);
+  cfg_n_pipe = sfnt_sock_get_int(ss);
+  cfg_n_unixs = sfnt_sock_get_int(ss);
+  cfg_n_unixd = sfnt_sock_get_int(ss);
+  cfg_n_udp = sfnt_sock_get_int(ss);
+  cfg_n_tcpc = sfnt_sock_get_int(ss);
+  cfg_n_tcpl = sfnt_sock_get_int(ss);
+  affinity_core_i = sfnt_sock_get_int(ss);
+  cfg_n_pings = sfnt_sock_get_int(ss);
+  cfg_n_pongs = sfnt_sock_get_int(ss);
+  cfg_nodelay = sfnt_sock_get_int(ss);
+}
+
+
 static void bind_udp_sock(int us, int ss)
 {
   struct sockaddr_in sa;
@@ -577,31 +649,10 @@ static int do_server2(int ss)
 {
   int sl, iter, msg_size;
   int read_fd, write_fd;
-  char* s;
 
-  sfnt_sock_put_str(ss, SFNT_VERSION);
-  sfnt_sock_put_str(ss, SFNT_SRC_CSUM);
-
-  fd_type = sfnt_sock_get_int(ss);
-  cfg_connect = sfnt_sock_get_int(ss);
-  cfg_spin = sfnt_sock_get_int(ss);
-  cfg_muxer = sfnt_sock_get_str(ss);
-  cfg_mcast = sfnt_sock_get_str(ss);
-  s = sfnt_sock_get_str(ss);
-  if( cfg_mcast_intf == NULL )
-    cfg_mcast_intf = s;
-  cfg_mcast_loop = sfnt_sock_get_int(ss);
-  cfg_n_pipe = sfnt_sock_get_int(ss);
-  cfg_n_unixs = sfnt_sock_get_int(ss);
-  cfg_n_unixd = sfnt_sock_get_int(ss);
-  cfg_n_udp = sfnt_sock_get_int(ss);
-  cfg_n_tcpc = sfnt_sock_get_int(ss);
-  cfg_n_tcpl = sfnt_sock_get_int(ss);
-  affinity_core_i = sfnt_sock_get_int(ss);
-  cfg_n_pings = sfnt_sock_get_int(ss);
-  cfg_n_pongs = sfnt_sock_get_int(ss);
-  cfg_nodelay = sfnt_sock_get_int(ss);
-  sfnt_sock_put_int(ss, sfnt_onload_is_active());
+  server_check_ver(ss);
+  server_recv_opts(ss);
+  sfnt_sock_put_str(ss, getenv("LD_PRELOAD"));
 
   /* Init after we've received config opts from client. */
   do_init();
@@ -779,28 +830,6 @@ static int next_msg_size(int prev_msg_size)
 }
 
 
-static void send_opts_to_server(int ss, int server_core_i)
-{
-  sfnt_sock_put_int(ss, fd_type);
-  sfnt_sock_put_int(ss, cfg_connect);
-  sfnt_sock_put_int(ss, cfg_spin);
-  sfnt_sock_put_str(ss, cfg_smuxer ? cfg_smuxer : cfg_muxer);
-  sfnt_sock_put_str(ss, cfg_mcast);
-  sfnt_sock_put_str(ss, cfg_mcast_intf);
-  sfnt_sock_put_int(ss, cfg_mcast_loop);
-  sfnt_sock_put_int(ss, cfg_n_pipe);
-  sfnt_sock_put_int(ss, cfg_n_unixs);
-  sfnt_sock_put_int(ss, cfg_n_unixd);
-  sfnt_sock_put_int(ss, cfg_n_udp);
-  sfnt_sock_put_int(ss, cfg_n_tcpc);
-  sfnt_sock_put_int(ss, cfg_n_tcpl);
-  sfnt_sock_put_int(ss, server_core_i);
-  sfnt_sock_put_int(ss, cfg_n_pings);
-  sfnt_sock_put_int(ss, cfg_n_pongs);
-  sfnt_sock_put_int(ss, cfg_nodelay);
-}
-
-
 static int try_connect(int sock, const char* hostport, int default_port)
 {
   int max_attempts = 100;
@@ -901,32 +930,17 @@ static int do_client(int argc, char* argv[])
 
 static int do_client2(int ss, const char* hostport, int local)
 {
-  char* serv_csum;
-  char* serv_ver;
   int server_core_i = -1;
   int read_fd, write_fd;
   int affinity_len;
-  int server_onload;
+  char* server_ld_preload;
   int msg_size;
   int* results;
   int* affinity;
   int one = 1;
   int rc;
 
-  /* Ensure the other end is identical. */
-  serv_ver  = sfnt_sock_get_str(ss);
-  serv_csum = sfnt_sock_get_str(ss);
-  if( strcmp(serv_ver, SFNT_VERSION) ) {
-    sfnt_err("ERROR: Version mismatch: me=%s server=%s\n",
-             SFNT_VERSION, serv_ver);
-    sfnt_fail_test();
-  }
-  if( strcmp(serv_csum, SFNT_SRC_CSUM) ) {
-    sfnt_err("ERROR: Source Checksum mismatch:\n");
-    sfnt_err("ERROR:     me=%s\n", SFNT_SRC_CSUM);
-    sfnt_err("ERROR: server=%s\n", serv_csum);
-    sfnt_fail_test();
-  }
+  client_check_ver(ss);
 
   if( cfg_affinity == NULL ) {
     /* Set affinity by default.  Avoid core 0, which often has various OS
@@ -950,11 +964,13 @@ static int do_client2(int ss, const char* hostport, int local)
     affinity_core_i = affinity[0];
     server_core_i = affinity[1];
   }
+  if( cfg_mcast_intf && cfg_mcast == NULL )
+    cfg_mcast = "224.1.2.48";
 
   do_init();
 
-  send_opts_to_server(ss, server_core_i);
-  server_onload = sfnt_sock_get_int(ss);
+  client_send_opts(ss, server_core_i);
+  server_ld_preload = sfnt_sock_get_str(ss);
 
   /* Create and bind/connect test socket. */
   switch( fd_type ) {
@@ -998,6 +1014,7 @@ static int do_client2(int ss, const char* hostport, int local)
   results = malloc(cfg_maxiter * sizeof(*results));
   NT_TEST(results != NULL);
   sfnt_dump_sys_info(&tsc);
+  printf("# server LD_PRELOAD=%s\n", server_ld_preload);
   printf("# options: %s%s%s\n",
          cfg_connect ? "connect ":"",
          cfg_spin ? "spin ":"",
@@ -1010,10 +1027,10 @@ static int do_client2(int ss, const char* hostport, int local)
   printf("# multicast=%s loop=%d\n",
          cfg_mcast ? cfg_mcast : "NO", cfg_mcast_loop);
   printf("# percentile=%g\n", (double) cfg_percentile);
-  printf("# server_onload=%d\n", server_onload);
   sfnt_onload_info_dump(stdout, "# ");
   printf("#\n");
   printf("#\tsize\tmean\tmin\tmedian\tmax\t%%ile\tstddev\titer\n");
+  fflush(stdout);
 
   if( fd_type & FDTF_STREAM ) {
     if( cfg_minmsg == 0 )
