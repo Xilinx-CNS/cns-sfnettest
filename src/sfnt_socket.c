@@ -51,6 +51,26 @@ int sfnt_getaddrinfo(const char* host, const char* port, int port_i,
 }
 
 
+int sfnt_get_port(int sock)
+{
+  struct sockaddr_storage sas;
+  struct sockaddr* sa = (void*) &sas;
+  socklen_t sa_len = sizeof(sas);
+  int rc;
+  if( (rc = getsockname(sock, sa, &sa_len)) < 0 )
+    return rc;
+  switch( sa->sa_family ) {
+  case AF_INET:
+    return ntohs(((struct sockaddr_in*) sa)->sin_port);
+  case AF_INET6:
+    return ntohs(((struct sockaddr_in6*) sa)->sin6_port);
+  default:
+    errno = ENOPROTOOPT;
+    return -1;
+  }
+}
+
+
 int sfnt_bind_port(int sock, int port)
 {
   struct sockaddr_in sa;
@@ -144,6 +164,15 @@ int sfnt_ip_add_membership(int sock, in_addr_t mcast_addr, const char* intf)
   }
 
   return setsockopt(sock, SOL_IP, IP_ADD_MEMBERSHIP, &r, sizeof(r));
+}
+
+
+int sfnt_sock_set_timeout(int sock, int send_or_recv, int millisec)
+{
+  struct timeval tv;
+  tv.tv_sec = millisec / 1000;
+  tv.tv_usec = (millisec % 1000) * 1000;
+  return setsockopt(sock, SOL_SOCKET, send_or_recv, &tv, sizeof(tv));
 }
 
 

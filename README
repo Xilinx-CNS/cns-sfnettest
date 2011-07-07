@@ -6,12 +6,10 @@ SfNetTest
  by Solarflare.  It differs from existing tools in some of the options it
  provides, which allow probing of particular application behaviours.
 
- sfnettest is available from <a
- href="http://www.openonload.org/">www.openonload.org</a>.
+ sfnettest is available from www.openonload.org.
 
- This first release is only supported on Linux, and only includes one tool;
- sfnt-pingpong.  We hope to port more of our tools into this framework over
- time.
+ This release is only supported on Linux.  We hope to port more of our
+ tools into this framework over time.
 
 
 Building
@@ -25,4 +23,4 @@ Building
 
 
 David Riddoch
-2011/02/22
+2011/07/05

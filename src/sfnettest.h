@@ -107,8 +107,8 @@ extern void sfnt_fail_test(void);
 #define __NT_TEST(x, fail_fn)                           \
 do {                                                    \
   if( ! (x) ) {                                         \
-    sfnt_err("ERROR: at %s:%d\n", __FILE__, __LINE__);    \
-    sfnt_err("ERROR: NT_ASSERT(%s) failed\n", #x);        \
+    sfnt_err("ERROR: at %s:%d\n", __FILE__, __LINE__);  \
+    sfnt_err("ERROR: NT_ASSERT(%s) failed\n", #x);      \
     fail_fn();                                          \
   }                                                     \
 } while(0)
@@ -118,9 +118,9 @@ do {                                                                    \
   int __a = (a);                                                        \
   int __b = (b);                                                        \
   if( ! (__a op __b) ) {                                                \
-    sfnt_err("ERROR: at %s:%d\n", __FILE__, __LINE__);                    \
-    sfnt_err("ERROR: (%s, %s, %s) failed\n", #a, #op, #b);                \
-    sfnt_err("ERROR: %s=%d %s=%d errno=(%d %s)\n", #a, __a, #b, __b,      \
+    sfnt_err("ERROR: at %s:%d\n", __FILE__, __LINE__);                  \
+    sfnt_err("ERROR: (%s, %s, %s) failed\n", #a, #op, #b);              \
+    sfnt_err("ERROR: %s=%d %s=%d errno=(%d %s)\n", #a, __a, #b, __b,    \
            errno, strerror(errno));                                     \
     fail_fn();                                                          \
   }                                                                     \
@@ -137,22 +137,22 @@ do {                                                                    \
 do {                                                            \
   int __rc;                                                     \
   if( ((__rc) = (x)) < 0 ) {                                    \
-    sfnt_err("ERROR: at %s:%d\n", __FILE__, __LINE__);            \
-    sfnt_err("ERROR: %s failed\n", #x);                           \
-    sfnt_err("ERROR: rc=%d errno=(%d %s)\n", (int) (__rc),        \
+    sfnt_err("ERROR: at %s:%d\n", __FILE__, __LINE__);          \
+    sfnt_err("ERROR: %s failed\n", #x);                         \
+    sfnt_err("ERROR: rc=%d errno=(%d %s)\n", (int) (__rc),      \
            errno, strerror(errno));                             \
-    sfnt_fail_test();                                             \
+    sfnt_fail_test();                                           \
   }                                                             \
 } while(0)
 
 #define NT_TRY2(rc, x)                                  \
 do {                                                    \
   if( ((rc) = (x)) < 0 ) {                              \
-    sfnt_err("ERROR: at %s:%d\n", __FILE__, __LINE__);    \
-    sfnt_err("ERROR: %s failed\n", #x);                   \
-    sfnt_err("ERROR: rc=%d errno=(%d %s)\n",              \
+    sfnt_err("ERROR: at %s:%d\n", __FILE__, __LINE__);  \
+    sfnt_err("ERROR: %s failed\n", #x);                 \
+    sfnt_err("ERROR: rc=%d errno=(%d %s)\n",            \
            (int) (rc), errno, strerror(errno));         \
-    sfnt_fail_test();                                     \
+    sfnt_fail_test();                                   \
   }                                                     \
 } while(0)
 
@@ -259,6 +259,10 @@ extern int sfnt_getaddrinfo(const char* host_or_hostport,
                             const char* port_or_null, int port_i_or_neg,
                             struct addrinfo**ai_out);
 
+/* Get port number socket is bound to. */
+extern int sfnt_get_port(int sock);
+
+/* Bind socket to given port and INADDR_ANY. */
 extern int sfnt_bind_port(int sock, int port);
 
 /* Port selected as for sfnt_getaddrinfo(). */
@@ -286,6 +290,9 @@ extern int sfnt_ip_multicast_if(int sock, const char* intf);
 extern int sfnt_ip_add_membership(int sock, in_addr_t mcast_addr,
                                 const char* intf_opt);
 
+/* Set socket timeout.  [send_or_recv] must be SO_RCVTIMEO or SO_SNDTIMEO. */
+extern int sfnt_sock_set_timeout(int sock, int send_or_recv, int millisec);
+
 extern void sfnt_sock_put_int(int fd, int v);
 extern int  sfnt_sock_get_int(int fd);
 extern void  sfnt_sock_put_str(int fd, const char* str);
@@ -302,6 +309,23 @@ extern char* sfnt_sock_get_str(int fd);
 #else
 # error TODO
 #endif
+
+
+/**********************************************************************
+ * Sequence-space comparisons.
+ */
+
+#define sfnt_int32_lt(a, b)      (((a) - (b)) & 0xf0000000)
+#define sfnt_int32_gt(a, b)      sfnt_int32_lt((b), (a))
+#define sfnt_int32_le(a, b)      (!sfnt_seq_lt((b), (a)))
+#define sfnt_int32_ge(a, b)      (!sfnt_seq_lt((a), (b)))
+
+#define sfnt_seq_eq(a, b, bits)  ((((a) - (b)) & ((1u << (bits)) - 1u)) == 0u)
+#define sfnt_seq_neq(a, b, bits) (((a) - (b)) & ((1u << (bits)) - 1))
+#define sfnt_seq_lt(a, b, bits)  (((a) - (b)) & (1u << ((bits) - 1)))
+#define sfnt_seq_gt(a, b, bits)  sfnt_seq_lt((b), (a), (bits))
+#define sfnt_seq_le(a, b, bits)  (!sfnt_seq_lt((b), (a), (bits)))
+#define sfnt_seq_ge(a, b, bits)  (!sfnt_seq_lt((a), (b), (bits)))
 
 
 /**********************************************************************

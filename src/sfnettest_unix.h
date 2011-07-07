@@ -25,7 +25,9 @@
 #include <net/if.h>
 #include <sys/wait.h>
 #include <sys/time.h>
+#include <sys/ioctl.h>
 #include <endian.h>
+#include <pthread.h>
 
 
 #define NT_HAVE_POLL    1

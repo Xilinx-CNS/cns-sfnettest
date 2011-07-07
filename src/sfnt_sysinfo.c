@@ -15,6 +15,7 @@
 void sfnt_dump_sys_info(const struct sfnt_tsc_params* tsc)
 {
 #ifndef _WIN32
+  const char* ld_preload;
   int rc;
 
   if( sfnt_cmd_line )
@@ -28,6 +29,9 @@ void sfnt_dump_sys_info(const struct sfnt_tsc_params* tsc)
   rc = system("lspci -d 1924: | sed 's/^/# sfnics: /'");
   rc = system("grep MemTotal /proc/meminfo | sed 's/^/# ram: /'");
   sfnt_out("# tsc_hz: %"PRId64"\n", tsc->hz);
+  ld_preload = getenv("LD_PRELOAD");
+  if( ld_preload )
+    sfnt_out("# LD_PRELOAD=%s\n", ld_preload);
 #endif
 }
 
@@ -62,12 +66,8 @@ int sfnt_onload_is_active(void)
 void sfnt_onload_info_dump(FILE* f, const char* pf)
 {
 #ifndef _WIN32
-  const char* ld_preload;
   char** p;
 
-  ld_preload = getenv("LD_PRELOAD");
-  if( ld_preload )
-    fprintf(f, "%sLD_PRELOAD=%s\n", pf, ld_preload);
   if( &onload_version )
     fprintf(f, "%sonload_version=%s\n", pf, onload_version);
   if( sfnt_onload_is_active() )

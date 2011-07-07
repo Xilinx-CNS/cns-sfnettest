@@ -1,0 +1,42 @@
+
+sfnt-stream
+===========
+
+Introduction
+------------
+
+ sfnt-stream measures streaming latency for a fixed message size over a
+ range of message rates.  At time of writing it only works with UDP
+ sockets, but will be extended to support other protocols and IPC
+ mechanisms later.
+
+
+Measuring network latency
+-------------------------
+
+ For measuring latency over a network, first start a "server" instance one
+ one node:
+
+   host1$ sfnt-stream
+
+ Then start a "client" instance on another node, passing the name of the
+ server node as follows:
+
+   host2$ sfnt-stream udp host1
+
+
+Options
+-------
+
+ There are numerous options to change details of the test.  The include:
+
+ - An option to "spin" making non-blocking calls (--spin)
+ - An option to use select, poll or epoll for blocking (--muxer)
+ - Options to add more file descriptors to select, poll and epoll
+   (--n-pipe, --n-udp, --n-tcpc, --n-tcpl)
+ - Options to use multicast with UDP (--mcastintf, --mcast, --mcastloop)
+ - An option to set CPU affinity (--affinty)
+
+ To get the full list, invoke:
+
+   host$ sfnt-stream --help

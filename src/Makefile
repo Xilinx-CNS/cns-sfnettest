@@ -1,5 +1,5 @@
 
-APPS		:= sfnt-pingpong
+APPS		:= sfnt-pingpong sfnt-stream
 DEFAULT		:= $(APPS)
 ALL		:= $(APPS)
 
@@ -36,14 +36,14 @@ libsfnettest.a: $(NETTEST_SRCS:%=%.o)
 # the presence/version of OpenOnload.
 sfnt_sysinfo.o: CFLAGS += -fPIC
 
-sfnt-pingpong: LIBS := -L. -lsfnettest -lm
-sfnt-pingpong: libsfnettest.a
+$(APPS): LIBS := -L. -lsfnettest -lm -lrt
+$(APPS): libsfnettest.a
 
 
 # TODO: Make this stuff VPATH friendly.
 sinclude version.mk
 ifeq ($(SFNT_VERSION),)
-SFNT_VERSION	:= $(shell hg id --id || echo no-version)
+SFNT_VERSION	:= $(shell hg id --id 2>/dev/null || echo no-version)
 endif
 SFNT_SRC_CSUM	:= $(shell cat *.c *.h | md5sum | sed 's/ .*//')
 CPPFLAGS	+= -DSFNT_VERSION='"$(SFNT_VERSION)"'
