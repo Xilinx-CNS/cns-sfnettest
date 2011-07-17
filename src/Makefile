@@ -37,6 +37,7 @@ libsfnettest.a: $(NETTEST_SRCS:%=%.o)
 sfnt_sysinfo.o: CFLAGS += -fPIC
 
 $(APPS): LIBS := -L. -lsfnettest -lm -lrt
+sfnt-stream: LIBS += -lpthread
 $(APPS): libsfnettest.a
 
 
