@@ -12,6 +12,11 @@
 #include "sfnettest.h"
 
 
+enum {
+  SFNT_CLAT_USAGE = 100,
+};
+
+
 const char* sfnt_app_name;
 char*       sfnt_cmd_line;
 
@@ -29,22 +34,10 @@ static void parse_cfg_string(char* s);
 
 
 static struct sfnt_cmd_line_opt std_opts[] = {
-  { '?', "help",     NT_CLO_USAGE, 0,             "this message"           },
-  { 'q', "quiet",    NT_CLO_FLAG, &sfnt_quiet,    "quiet"                  },
-  { 'v', "verbose",  NT_CLO_FLAG, &sfnt_verbose,  "verbose"                },
-  {   0, "version",  NT_CLO_FLAG, &sfnt_version,  "print version and exit" },
-#if 0 /*??*/
-  {   0, "hang",     NT_CLO_FLAG, &ci_cfg_hang_on_fail,
-      "hang on failure" },
-  {   0, "segv",     NT_CLO_FLAG, &ci_cfg_segv_on_fail,
-      "cause segmentation fault on failure" },
-#ifdef __unix__
-  {   0, "stop",     NT_CLO_FLAG, &ci_cfg_stop_on_fail,
-      "send process SIGSTOP on failure" },
-  {   0, "abort",    NT_CLO_FLAG, &ci_cfg_abort_on_fail,
-      "abort process on failure" },
-#endif
-#endif
+  SFNT_CLAS('?', "help",    USAGE, NULL,           "this message"),
+  SFNT_CLAS('q', "quiet",   FLAG,  &sfnt_quiet,    "quiet"),
+  SFNT_CLAS('v', "verbose", FLAG,  &sfnt_verbose,  "verbose"),
+  SFNT_CLAS(  0, "version", FLAG,  &sfnt_version,  "print version and exit"),
 };
 #define N_STD_OPTS  (sizeof(std_opts) / sizeof(std_opts[0]))
 
@@ -213,6 +206,95 @@ static void bad_cla(const char* context, const char* cla, const char* msg)
 }
 
 
+static int sizeof_cla_type(enum sfnt_cla_type type)
+{
+  switch( type ) {
+  case SFNT_CLAT_FLAG:
+  case SFNT_CLAT_INT:
+  case SFNT_CLAT_UINT:
+    return sizeof(int);
+  case SFNT_CLAT_STR:
+    return sizeof(char*);
+  case SFNT_CLAT_INT64:
+  case SFNT_CLAT_UINT64:
+    return sizeof(uint64_t);
+  case SFNT_CLAT_FLOAT:
+    return sizeof(float);
+  default:
+    NT_TEST(0);
+    return 0;
+  }
+}
+
+
+static void cla_get_val(const char* context, const char* opt_name,
+                        const struct sfnt_cmd_line_opt* a,
+                        int i, const char* val)
+{
+  switch( a->type ) {
+  case SFNT_CLAT_FLAG:
+    if( val ) {
+      if( sscanf(val, "%d", &((int*) a->value)[i]) != 1 )
+	bad_cla(context, opt_name, "expected integer or nothing");
+    }
+    else
+      ++((int*) a->value)[i];
+    break;
+  case SFNT_CLAT_INT:
+    if( !val || sscanf(val, "%i", &((int*) a->value)[i]) != 1 )
+      bad_cla(context, opt_name, "expected integer");
+    break;
+  case SFNT_CLAT_UINT:
+    if( !val || sscanf(val, "%i", &((int*) a->value)[i]) != 1 ||
+        ((int*) a->value)[i] < 0 )
+      bad_cla(context, opt_name, "expected unsigned integer");
+    break;
+  case SFNT_CLAT_INT64:
+    if( !val || sscanf(val, "%lli", &((long long int*) a->value)[i]) != 1 )
+      bad_cla(context, opt_name, "expected 64bit integer");
+    break;
+  case SFNT_CLAT_UINT64:
+    if( !val || sscanf(val, "%lli", &((long long int*) a->value)[i]) != 1 ||
+        ((long long int*) a->value)[i] < 0 )
+      bad_cla(context, opt_name, "expected unsigned 64bit integer");
+    break;
+  case SFNT_CLAT_FLOAT:
+    if( !val || sscanf(val, "%f", &((float*) a->value)[i]) != 1 )
+      bad_cla(context, opt_name, "expected number");
+    break;
+  case SFNT_CLAT_STR:
+    ((char**) a->value)[i] = strdup(val ? val : "");
+    break;
+  case SFNT_CLAT_USAGE:
+    sfnt_usage(stdout, NULL);
+    exit(0);
+    break;
+  case SFNT_CLAT_FN:
+    assert(a->fn);
+    a->fn(val, a);
+    break;
+#if 0
+  case SFNT_CLAT_IRANGE:
+    {
+      int *v;
+      v = (int*) a->value;
+      if( sscanf(val, " %i - %i", v, v + 1) != 2 ) {
+	if( sscanf(val, " %i", v) == 1 )
+	  v[1] = v[0];
+	else
+	  bad_cla(context, opt_name, "expected integer or range");
+      }
+    }
+    break;
+#endif
+  default:
+    sfnt_err("%s: unknown config option type %u\n", __FUNCTION__, a->type);
+    sfnt_abort();
+    break;
+  }
+}
+
+
 static const struct sfnt_cmd_line_opt* find_cfg_desc(const char* opt,
                                           const struct sfnt_cmd_line_opt* opts,
                                           int                n_opts,
@@ -225,10 +307,9 @@ static const struct sfnt_cmd_line_opt* find_cfg_desc(const char* opt,
 
   for( a = opts; a != opts + n_opts; ++a ) {
     NT_ASSERT(a->short_name || a->long_name);
-
     if( opt[1] == '-' ) {  /* its in long format */
-      if( !a->long_name )  continue;
-
+      if( a->long_name == NULL )
+        continue;
       len = strlen(a->long_name);
       if( !strncmp(opt + 2, a->long_name, len) ) {
 	if( opt[2 + len] == '=' ) {
@@ -240,14 +321,12 @@ static const struct sfnt_cmd_line_opt* find_cfg_desc(const char* opt,
 	  return a;
 	}
       }
-      continue;
     }
     else {  /* its in short format */
       if( opt[1] == a->short_name ) {
 	*pval = opt + 2;
 	return a;
       }
-      continue;
     }
   }
   return 0;
@@ -257,89 +336,66 @@ static const struct sfnt_cmd_line_opt* find_cfg_desc(const char* opt,
 static int parse_cfg_opt(int argc, char** argv, const char* context)
 {
   const struct sfnt_cmd_line_opt* a;
+  const char* opt_name = argv[0];
   const char* val = NULL;
-  int result = 1;
+  int i, result = 1;
 
   /* is it "-" ? */
-  if( argv[0][1] == 0 )  bad_cla(context, argv[0], "- is not allowed");
+  if( opt_name[1] == '\0' )
+    bad_cla(context, opt_name, "- is not allowed");
 
   /* find the option descriptor */
   a = NULL;
   if( cmd_line_opts )
-    a = find_cfg_desc(argv[0], cmd_line_opts, cmd_line_opts_n, &val);
+    a = find_cfg_desc(opt_name, cmd_line_opts, cmd_line_opts_n, &val);
   if( a == NULL )
-    a = find_cfg_desc(argv[0], std_opts, N_STD_OPTS, &val);
+    a = find_cfg_desc(opt_name, std_opts, N_STD_OPTS, &val);
   if( a == NULL )
-    bad_cla(context, argv[0], "unknown option");
+    bad_cla(context, opt_name, "unknown option");
 
   /* the option value (if required) may be part of this arg or the next */
-  if( !val || *val == 0 ) {
-    if( a->type == NT_CLO_FLAG || a->type == NT_CLO_USAGE || argc == 1 ) {
-      val = 0;
-    } else {
+  if( val == NULL || *val == '\0' ) {
+    if( a->type == SFNT_CLAT_FLAG || a->type == SFNT_CLAT_USAGE ||
+        argc == 1 ) {
+      val = NULL;
+    }
+    else {
       val = argv[1];
       result = 2;
     }
   }
 
-  switch( a->type ) {
-  case NT_CLO_FLAG:
-    if( val ) {
-      if( sscanf(val, "%d", (int*) a->value) != 1 )
-	bad_cla(context, argv[0], "expected integer or nothing");
-    }
-    else
-      ++(*(int*) a->value);
-    break;
-  case NT_CLO_INT:
-    if( !val || sscanf(val, "%i", (int*) a->value) != 1 )
-      bad_cla(context, argv[0], "expected integer");
-    break;
-  case NT_CLO_UINT:
-    if( !val || sscanf(val, "%i", (int*) a->value) != 1 ||
-        *((int*) a->value) < 0 )
-      bad_cla(context, argv[0], "expected unsigned integer");
-    break;
-  case NT_CLO_INT64:
-    if( !val || sscanf(val, "%lli", (long long int*) a->value) != 1 )
-      bad_cla(context, argv[0], "expected 64bit integer");
-    break;
-  case NT_CLO_UINT64:
-    if( !val || sscanf(val, "%lli", (long long int*) a->value) != 1 ||
-        *((long long int*) a->value) < 0 )
-      bad_cla(context, argv[0], "expected unsigned 64bit integer");
-    break;
-  case NT_CLO_FLOAT:
-    if( !val || sscanf(val, "%f", (float*) a->value) != 1 )
-      bad_cla(context, argv[0], "expected number");
-    break;
-  case NT_CLO_STR:
-    *(const char**) a->value = val ? val : "";
-    break;
-  case NT_CLO_USAGE:
-    sfnt_usage(stdout, NULL);
-    exit(0);
-    break;
-  case NT_CLO_FN:
-    assert(a->fn);
-    a->fn(val, a);
-    break;
-  case NT_CLO_IRANGE:
-    {
-      int *v;
-      v = (int*) a->value;
-      if( sscanf(val, " %i - %i", v, v + 1) != 2 ) {
-	if( sscanf(val, " %i", v) == 1 )
-	  v[1] = v[0];
-	else
-	  bad_cla(context, argv[0], "expected integer or range");
+  if( val && a->num > 0 ) {
+    char *p, *v = strdup(val);
+    for( i = 0; i < a->num; ++i )
+      if( (p = strchr(val, ';')) != NULL ) {
+        *p = '\0';
+        cla_get_val(context, opt_name, a, i, val);
+        val = p + 1;
       }
+      else {
+        cla_get_val(context, opt_name, a, i, val);
+        val = NULL;
+        ++i;
+        break;
+      }
+    if( val != NULL )
+      bad_cla(context, opt_name, "too many values");
+    if( a->flags & SFNT_CLAF_FILL ) {
+      int siz = sizeof_cla_type(a->type);
+      for( ; i < a->num; ++i )
+        memcpy((char*) a->value + i*siz, (char*) a->value + (i-1)*siz, siz);
     }
-    break;
-  default:
-    sfnt_err("%s: unknown config option type %u\n", __FUNCTION__, a->type);
-    sfnt_abort();
-    break;
+    free(v);
+  }
+  else if( a->type == SFNT_CLAT_FLAG && a->num > 0 ) {
+    /* Yuk, special case. */
+    for( i = 0; i < a->num; ++i )
+      ++((int*) a->value)[i];
+  }
+  else {
+    NT_TEST((a->flags & SFNT_CLAF_FILL) == 0);
+    cla_get_val(context, opt_name, a, 0, val);
   }
 
   return result;

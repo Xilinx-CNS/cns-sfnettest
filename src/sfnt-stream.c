@@ -25,58 +25,58 @@ static int         cfg_samples;
 static int         cfg_stop = 90;
 static int         cfg_max_burst = 100;
 static int         cfg_port = 2049;
-static int         cfg_connect;
-static int         cfg_spin;
-static const char* cfg_muxer;
-static const char* cfg_smuxer;
+static int         cfg_connect[2];
+static int         cfg_spin[2];
+static const char* cfg_muxer[2];
 static int         cfg_rtt;
 static const char* cfg_raw;
 static float       cfg_percentile = 99;
 static const char* cfg_mcast;
-static const char* cfg_mcast_intf;
-static int         cfg_mcast_loop;
-static const char* cfg_bindtodev;
-static unsigned    cfg_n_pipe;
-static unsigned    cfg_n_unixd;
-static unsigned    cfg_n_unixs;
-static unsigned    cfg_n_udp;
-static unsigned    cfg_n_tcpc;
-static unsigned    cfg_n_tcpl;
+static const char* cfg_mcast_intf[2];
+static int         cfg_mcast_loop[2];
+static const char* cfg_bindtodev[2];
+static unsigned    cfg_n_pipe[2];
+static unsigned    cfg_n_unixd[2];
+static unsigned    cfg_n_unixs[2];
+static unsigned    cfg_n_udp[2];
+static unsigned    cfg_n_tcpc[2];
+static unsigned    cfg_n_tcpl[2];
 static const char* cfg_tcpc_serv;
-static const char* cfg_affinity;
+static const char* cfg_affinity[2];
 static int         cfg_nodelay;
 
+#define CL1(a, b, c, d)  SFNT_CLA(a, b, &(c), d)
+#define CL2(a, b, c, d)  SFNT_CLA2(a, b, &(c), d)
+
 static struct sfnt_cmd_line_opt cfg_opts[] = {
-  {   0, "msgsize",  NT_CLO_UINT, &cfg_msg_size,"message size (bytes)"       },
-  {   0, "rates",    NT_CLO_STR,  &cfg_rates,   "set msg rates "
-                                                "<min>-<max>[+<step>]"       },
-  {   0, "millisec", NT_CLO_UINT, &cfg_millisec,"time per test (millisec)"   },
-  {   0, "samples",  NT_CLO_UINT, &cfg_samples, "samples per test"           },
-  {   0, "stop",     NT_CLO_UINT, &cfg_stop,    "stop when TX rate achieved "
-                                        "is below given percentage of target"},
-  {   0, "maxburst", NT_CLO_UINT, &cfg_max_burst,"max burst length"          },
-  {   0, "port",     NT_CLO_UINT, &cfg_port,   "server port#"                },
-  {   0, "connect",  NT_CLO_FLAG, &cfg_connect,"connect() UDP socket"        },
-  {   0, "spin",     NT_CLO_FLAG, &cfg_spin,   "spin on non-blocking recv()" },
-  {   0, "muxer",    NT_CLO_STR,  &cfg_muxer,  "select, poll or epoll"       },
-  {   0, "serv-muxer",NT_CLO_STR, &cfg_smuxer, "none, select, poll or epoll "
-                                               "(same as client by default)" },
-  {   0, "rtt",      NT_CLO_FLAG, &cfg_rtt,    "report round-trip-time"      },
-  {   0, "raw",      NT_CLO_STR,  &cfg_raw,    "dump raw results to files"   },
-  {   0, "percentile",NT_CLO_FLOAT,&cfg_percentile,"percentile"              },
-  {   0, "mcast",    NT_CLO_STR,  &cfg_mcast,  "use multicast addressing"    },
-  {   0, "mcastintf",NT_CLO_STR,  &cfg_mcast_intf,"set multicast interface"  },
-  {   0, "mcastloop",NT_CLO_FLAG, &cfg_mcast_loop,"IP_MULTICAST_LOOP"        },
-  {   0, "bindtodev",NT_CLO_STR,  &cfg_bindtodev, "SO_BINDTODEVICE"          },
-  {   0, "n-pipe",   NT_CLO_UINT, &cfg_n_pipe, "include pipes in fd set"     },
-  {   0, "n-unix-d", NT_CLO_UINT, &cfg_n_unixd,"include unix dgram in fd set"},
-  {   0, "n-unix-s", NT_CLO_UINT, &cfg_n_unixs,"include unix strm in fd set" },
-  {   0, "n-udp",    NT_CLO_UINT, &cfg_n_udp,  "include UDP socks in fd set" },
-  {   0, "n-tcpc",   NT_CLO_UINT, &cfg_n_tcpc, "include TCP socks in fd set" },
-  {   0, "n-tcpl",   NT_CLO_UINT, &cfg_n_tcpl, "include TCP listeners in fds"},
-  {   0, "tcpc-serv",NT_CLO_STR,  &cfg_tcpc_serv,"host:port for tcp conns"   },
-  {   0, "affinity", NT_CLO_STR,  &cfg_affinity,"<client-core>,<server-core>"},
-  {   0, "nodelay",  NT_CLO_FLAG, &cfg_nodelay, "enable TCP_NODELAY"         },
+  CL1("msgsize",   UINT, cfg_msg_size,  "message size (bytes)"              ),
+  CL1("rates",     STR,  cfg_rates,     "set msg rates <min>-<max>[+<step>]"),
+  CL1("millisec",  UINT, cfg_millisec,  "time per test (millisec)"          ),
+  CL1("samples",   UINT, cfg_samples,   "samples per test"                  ),
+  CL1("stop",      UINT, cfg_stop,      "stop when TX rate achieved is below "
+                                        "given percentage of target"        ),
+  CL1("maxburst",  UINT, cfg_max_burst, "max burst length"                  ),
+  CL1("port",      UINT, cfg_port,      "server port#"                      ),
+  CL2("connect",   FLAG, cfg_connect,   "connect() UDP socket"              ),
+  CL2("spin",      FLAG, cfg_spin,      "spin on non-blocking recv()"       ),
+  CL2("muxer",     STR,  cfg_muxer,     "select, poll, epoll or none"       ),
+  CL1("rtt",       FLAG, cfg_rtt,       "report round-trip-time"            ),
+  CL1("raw",       STR,  cfg_raw,       "dump raw results to files"         ),
+  CL1("percentile",FLOAT,cfg_percentile,"percentile"                        ),
+  CL1("mcast",     STR,  cfg_mcast,     "use multicast addressing"          ),
+  CL2("mcastintf", STR,  cfg_mcast_intf,"set multicast interface"           ),
+  CL2("mcastloop", FLAG, cfg_mcast_loop,"IP_MULTICAST_LOOP"                 ),
+  CL2("bindtodev", STR,  cfg_bindtodev, "SO_BINDTODEVICE"                   ),
+  CL2("n-pipe",    UINT, cfg_n_pipe,    "include pipes in fd set"           ),
+  CL2("n-unix-d",  UINT, cfg_n_unixd,   "include unix dgram in fd set"      ),
+  CL2("n-unix-s",  UINT, cfg_n_unixs,   "include unix strm in fd set"       ),
+  CL2("n-udp",     UINT, cfg_n_udp,     "include UDP socks in fd set"       ),
+  CL2("n-tcpc",    UINT, cfg_n_tcpc,    "include TCP socks in fd set"       ),
+  CL2("n-tcpl",    UINT, cfg_n_tcpl,    "include TCP listeners in fds"      ),
+  CL1("tcpc-serv", STR,  cfg_tcpc_serv, "host:port for tcp conns"           ),
+  CL2("affinity",  STR,  cfg_affinity,  "<client-tx>,<client-rx>;"
+                                        "<server-core>"                     ),
+  CL1("nodelay",   FLAG, cfg_nodelay,   "enable TCP_NODELAY"                ),
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
@@ -230,9 +230,10 @@ enum fd_type {
 static struct sfnt_tsc_params tsc;
 static char           ppbuf[64 * 1024];
 
+static int            client_rx_core_i;
+
 static enum fd_type   fd_type;
 static int            the_fds[4];  /* used for pipes and unix sockets */
-static int            affinity_core_i = -1;
 
 static fd_set         select_fdset;
 static int            select_fds[MAX_FDS];
@@ -300,7 +301,7 @@ static ssize_t sfn_write(int fd, const void* buf, size_t len, int flags)
 
 static void select_init(void)
 {
-  NT_ASSERT(cfg_spin == 0);  /* spin not yet supported with select */
+  NT_ASSERT(cfg_spin[0] == 0);  /* spin not yet supported with select */
   FD_ZERO(&select_fdset);
 }
 
@@ -349,7 +350,7 @@ static ssize_t poll_recv(int fd, void* buf, size_t len, int flags)
   int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   do {
-    rc = sfnt_poll(pfds, pfds_n, timeout_ms, cfg_spin ? NT_MUX_SPIN : 0);
+    rc = sfnt_poll(pfds, pfds_n, timeout_ms, cfg_spin[0] ? NT_MUX_SPIN : 0);
     if( rc == 1 ) {
       NT_TEST(pfds[0].revents & POLLIN);
       if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
@@ -392,7 +393,7 @@ static ssize_t epoll_recv(int fd, void* buf, size_t len, int flags)
   int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   do {
-    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, cfg_spin);
+    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, cfg_spin[0]);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
       if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
@@ -418,7 +419,7 @@ static ssize_t epoll_mod_recv(int fd, void* buf, size_t len, int flags)
   e.events = EPOLLIN;
   NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &e));
   do {
-    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, cfg_spin);
+    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, cfg_spin[0]);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
       if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
@@ -446,7 +447,7 @@ static ssize_t epoll_adddel_recv(int fd, void* buf, size_t len, int flags)
   e.events = EPOLLIN;
   NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &e));
   do {
-    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, cfg_spin);
+    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, cfg_spin[0]);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
       if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
@@ -492,18 +493,23 @@ static ssize_t spin_recv(int fd, void* buf, size_t len, int flags)
 
 /**********************************************************************/
 
+static void cpu_affinity_set(int core_i)
+{
+  if( sfnt_cpu_affinity_set(core_i) != 0 ) {
+    sfnt_err("ERROR: Failed to set CPU affinity to core %d (%d %s)\n",
+             core_i, errno, strerror(errno));
+    sfnt_fail_test();
+  }
+}
+
+
 static void do_init(void)
 {
-  if( affinity_core_i >= 0 )
-    if( sfnt_cpu_affinity_set(affinity_core_i) != 0 ) {
-      sfnt_err("ERROR: Failed to set CPU affinity to core %d (%d %s)\n",
-             affinity_core_i, errno, strerror(errno));
-      sfnt_fail_test();
-    }
+  const char* muxer = cfg_muxer[0];
 
   NT_TRY(sfnt_tsc_get_params(&tsc));
 
-  if( fd_type == FDT_UDP && ! cfg_connect ) {
+  if( fd_type == FDT_UDP && ! cfg_connect[0] ) {
     do_recv = rfn_recv;
     do_send = sfn_sendto;
   }
@@ -516,34 +522,33 @@ static void do_init(void)
     do_send = sfn_write;
   }
 
-  if( cfg_muxer == NULL || ! strcasecmp(cfg_muxer, "") ||
-      ! strcasecmp(cfg_muxer, "none") ) {
-    mux_recv = cfg_spin ? spin_recv : do_recv;
+  if( muxer == NULL || ! strcmp(muxer, "") || ! strcasecmp(muxer, "none") ) {
+    mux_recv = cfg_spin[0] ? spin_recv : do_recv;
     mux_add = noop_add;
   }
-  else if( ! strcasecmp(cfg_muxer, "select") ) {
+  else if( ! strcasecmp(muxer, "select") ) {
     mux_recv = select_recv;
     mux_add = select_add;
     select_init();
   }
 #if NT_HAVE_POLL
-  else if( ! strcasecmp(cfg_muxer, "poll") ) {
+  else if( ! strcasecmp(muxer, "poll") ) {
     mux_recv = poll_recv;
     mux_add = poll_add;
   }
 #endif
 #if NT_HAVE_EPOLL
-  else if( ! strcasecmp(cfg_muxer, "epoll") ) {
+  else if( ! strcasecmp(muxer, "epoll") ) {
     mux_recv = epoll_recv;
     mux_add = epoll_add;
     epoll_init();
   }
-  else if( ! strcasecmp(cfg_muxer, "epoll_mod") ) {
+  else if( ! strcasecmp(muxer, "epoll_mod") ) {
     mux_recv = epoll_mod_recv;
     mux_add = epoll_add;
     epoll_init();
   }
-  else if( ! strcasecmp(cfg_muxer, "epoll_adddel") ) {
+  else if( ! strcasecmp(muxer, "epoll_adddel") ) {
     mux_recv = epoll_adddel_recv;
     mux_add = noop_add;
     epoll_init();
@@ -562,11 +567,11 @@ static void add_fds(int us)
 
   mux_add(us);
 #ifdef __unix__
-  for( i = 0; i < cfg_n_pipe; ++i ) {
+  for( i = 0; i < cfg_n_pipe[0]; ++i ) {
     int pfd[2];
     NT_TEST(pipe(pfd) == 0);
     mux_add(pfd[0]);
-    if( ++i < cfg_n_pipe )
+    if( ++i < cfg_n_pipe[0] )
       /* Slightly dodgy that we're selecting on the "write" fd for read.
        * The write fd is never readable, so it does at least work, but I
        * suppose the performance might not be quite the same.  Advantage of
@@ -574,31 +579,31 @@ static void add_fds(int us)
        */
       mux_add(pfd[1]);
   }
-  for( i = 0; i < cfg_n_unixd; ++i ) {
+  for( i = 0; i < cfg_n_unixd[0]; ++i ) {
     int fds[2];
     NT_TEST(socketpair(PF_UNIX, SOCK_DGRAM, 0, fds) == 0);
     mux_add(fds[0]);
-    if( ++i < cfg_n_unixd )
+    if( ++i < cfg_n_unixd[0] )
       mux_add(fds[1]);
   }
-  for( i = 0; i < cfg_n_unixs; ++i ) {
+  for( i = 0; i < cfg_n_unixs[0]; ++i ) {
     int fds[2];
     NT_TEST(socketpair(PF_UNIX, SOCK_STREAM, 0, fds) == 0);
     mux_add(fds[0]);
-    if( ++i < cfg_n_unixs )
+    if( ++i < cfg_n_unixs[0] )
       mux_add(fds[1]);
   }
 #endif
-  for( i = 0; i < cfg_n_udp; ++i ) {
+  for( i = 0; i < cfg_n_udp[0]; ++i ) {
     NT_TRY2(sock, socket(PF_INET, SOCK_DGRAM, 0));
     mux_add(sock);
   }
-  for( i = 0; i < cfg_n_tcpc; ++i ) {
+  for( i = 0; i < cfg_n_tcpc[0]; ++i ) {
     NT_TRY2(sock, socket(PF_INET, SOCK_STREAM, 0));
     NT_TRY(sfnt_connect(sock, cfg_tcpc_serv, NULL, -1));
     mux_add(sock);
   }
-  for( i = 0; i < cfg_n_tcpl; ++i ) {
+  for( i = 0; i < cfg_n_tcpl[0]; ++i ) {
     NT_TRY2(sock, socket(PF_INET, SOCK_STREAM, 0));
     NT_TRY(listen(sock, 1));
     mux_add(sock);
@@ -631,45 +636,44 @@ static void server_check_ver(int ss)
 }
 
 
-static void client_send_opts(int ss, int server_core_i)
+static void client_send_opts(int ss)
 {
   sfnt_sock_put_int(ss, fd_type);
-  sfnt_sock_put_int(ss, cfg_connect);
-  sfnt_sock_put_int(ss, cfg_spin);
-  sfnt_sock_put_str(ss, cfg_smuxer ? cfg_smuxer : cfg_muxer);
+  sfnt_sock_put_int(ss, cfg_connect[1]);
+  sfnt_sock_put_int(ss, cfg_spin[1]);
+  sfnt_sock_put_str(ss, cfg_muxer[1]);
   sfnt_sock_put_str(ss, cfg_mcast);
-  sfnt_sock_put_str(ss, cfg_mcast_intf);
-  sfnt_sock_put_int(ss, cfg_mcast_loop);
-  sfnt_sock_put_int(ss, cfg_n_pipe);
-  sfnt_sock_put_int(ss, cfg_n_unixs);
-  sfnt_sock_put_int(ss, cfg_n_unixd);
-  sfnt_sock_put_int(ss, cfg_n_udp);
-  sfnt_sock_put_int(ss, cfg_n_tcpc);
-  sfnt_sock_put_int(ss, cfg_n_tcpl);
-  sfnt_sock_put_int(ss, server_core_i);
+  sfnt_sock_put_str(ss, cfg_mcast_intf[1]);
+  sfnt_sock_put_int(ss, cfg_mcast_loop[1]);
+  sfnt_sock_put_str(ss, cfg_bindtodev[1]);
+  sfnt_sock_put_int(ss, cfg_n_pipe[1]);
+  sfnt_sock_put_int(ss, cfg_n_unixs[1]);
+  sfnt_sock_put_int(ss, cfg_n_unixd[1]);
+  sfnt_sock_put_int(ss, cfg_n_udp[1]);
+  sfnt_sock_put_int(ss, cfg_n_tcpc[1]);
+  sfnt_sock_put_int(ss, cfg_n_tcpl[1]);
+  sfnt_sock_put_str(ss, cfg_affinity[1]);
   sfnt_sock_put_int(ss, cfg_nodelay);
 }
 
 
 static void server_recv_opts(int ss)
 {
-  char* s;
   fd_type = sfnt_sock_get_int(ss);
-  cfg_connect = sfnt_sock_get_int(ss);
-  cfg_spin = sfnt_sock_get_int(ss);
-  cfg_muxer = sfnt_sock_get_str(ss);
+  cfg_connect[0] = sfnt_sock_get_int(ss);
+  cfg_spin[0] = sfnt_sock_get_int(ss);
+  cfg_muxer[0] = sfnt_sock_get_str(ss);
   cfg_mcast = sfnt_sock_get_str(ss);
-  s = sfnt_sock_get_str(ss);
-  if( cfg_mcast_intf == NULL )
-    cfg_mcast_intf = s;
-  cfg_mcast_loop = sfnt_sock_get_int(ss);
-  cfg_n_pipe = sfnt_sock_get_int(ss);
-  cfg_n_unixs = sfnt_sock_get_int(ss);
-  cfg_n_unixd = sfnt_sock_get_int(ss);
-  cfg_n_udp = sfnt_sock_get_int(ss);
-  cfg_n_tcpc = sfnt_sock_get_int(ss);
-  cfg_n_tcpl = sfnt_sock_get_int(ss);
-  affinity_core_i = sfnt_sock_get_int(ss);
+  cfg_mcast_intf[0] = sfnt_sock_get_str(ss);
+  cfg_mcast_loop[0] = sfnt_sock_get_int(ss);
+  cfg_bindtodev[0] = sfnt_sock_get_str(ss);
+  cfg_n_pipe[0] = sfnt_sock_get_int(ss);
+  cfg_n_unixs[0] = sfnt_sock_get_int(ss);
+  cfg_n_unixd[0] = sfnt_sock_get_int(ss);
+  cfg_n_udp[0] = sfnt_sock_get_int(ss);
+  cfg_n_tcpc[0] = sfnt_sock_get_int(ss);
+  cfg_n_tcpl[0] = sfnt_sock_get_int(ss);
+  cfg_affinity[0] = sfnt_sock_get_str(ss);
   cfg_nodelay = sfnt_sock_get_int(ss);
 }
 
@@ -709,14 +713,21 @@ static int do_server2(int ss)
   server_recv_opts(ss);
   sfnt_sock_put_str(ss, getenv("LD_PRELOAD"));
 
+  if( strcasecmp(cfg_affinity[0], "any") ) {
+    int core_i;
+    if( sscanf(cfg_affinity[0], "%d", &core_i) != 1 )
+      sfnt_fail_usage("ERROR: bad argument for --affinity");
+    cpu_affinity_set(core_i);
+  }
+
   /* No support for other fd_types yet. */
   NT_TESTi3(fd_type, ==, FDT_UDP);
   /* Init after we've received config opts from client. */
   do_init();
 
   NT_TRY2(sock, socket(PF_INET, SOCK_DGRAM, 0));
-  if( cfg_bindtodev )
-    NT_TRY(sfnt_so_bindtodevice(sock, cfg_bindtodev));
+  if( cfg_bindtodev[0] )
+    NT_TRY(sfnt_so_bindtodevice(sock, cfg_bindtodev[0]));
   if( cfg_mcast ) {
     struct sockaddr_in sin;
     sin.sin_family = AF_INET;
@@ -726,7 +737,8 @@ static int do_server2(int ss)
     else
       sin.sin_addr.s_addr = inet_addr(cfg_mcast);
     NT_TRY(bind(sock, (const struct sockaddr*) &sin, sizeof(sin)));
-    NT_TRY(sfnt_ip_add_membership(sock, inet_addr(cfg_mcast), cfg_mcast_intf));
+    NT_TRY(sfnt_ip_add_membership(sock, inet_addr(cfg_mcast),
+                                  cfg_mcast_intf[0]));
   }
   else {
     NT_TRY(sfnt_bind_port(sock, 0));
@@ -922,10 +934,8 @@ static void* client_rx_thread(void* arg)
   struct client_rx* crx = arg;
   struct sockaddr_in sin;
 
-  /* Do allocation and initialisation after setting affinity, to ensure
-   * optimal locality.
-   */
-  sfnt_cpu_affinity_set(2);/*??fixme todo*/
+  /* Set affinity first to ensure optimal locality. */
+  cpu_affinity_set(client_rx_core_i);
   crx->reply_buf_len = 64 * 1024;
   crx->reply = malloc(crx->reply_buf_len);
   switch( fd_type ) {
@@ -1333,9 +1343,6 @@ static int do_client(int argc, char* argv[])
     /* Default to one latency sample per millisecond of test time. */
     cfg_samples = cfg_millisec;
 
-  if( cfg_muxer == NULL )
-    cfg_muxer = "none";
-
   if( fd_type & FDTF_LOCAL ) {
     int ss[2];
     if( argc != 1 )
@@ -1392,42 +1399,36 @@ static int do_client(int argc, char* argv[])
 static int do_client2(int ss, const char* hostport, int local)
 {
   struct client_tx* ctx;
-  int server_core_i = -1;
-  int affinity_len;
-  int* affinity;
   int one = 1;
   char dummy;
-  int rc;
 
   client_check_ver(ss);
 
-  if( cfg_affinity == NULL ) {
+  if( cfg_affinity[0] == NULL ) {
     /* Set affinity by default.  Avoid core 0, which often has various OS
      * junk running on it that causes high jitter.  We'll get an error on
      * singe core boxes -- user will just have to set affinity explicitly.
      */
-    if( local && cfg_spin )
+    cfg_affinity[0] = "1,2";
+    cfg_affinity[1] = "1";
+    if( local && cfg_spin[0] )
       /* It is a very bad idea to pin two spinners onto the same core, as
        * they'll just fight each other for timeslices.
        */
-      cfg_affinity = "1,2";
-    else
-      cfg_affinity = "1,1";
+      cfg_affinity[1] = "3";
   }
-  if( strcasecmp(cfg_affinity, "") && strcasecmp(cfg_affinity, "any") &&
-      strcasecmp(cfg_affinity, "none") ) {
-    rc = sfnt_parse_int_list(cfg_affinity, &affinity, &affinity_len);
-    if( rc != 0 || affinity_len != 2 )
-      sfnt_fail_usage("ERROR: Bad --affinity option (rc=%d len=%d)",
-                      rc, affinity_len);
-    affinity_core_i = affinity[0];
-    server_core_i = affinity[1];
+  if( strcasecmp(cfg_affinity[0], "any") ) {
+    int core_i;
+    if( sscanf(cfg_affinity[0], "%d,%d", &core_i, &client_rx_core_i) != 2 )
+      sfnt_fail_usage("ERROR: bad argument for --affinity");
+    cpu_affinity_set(core_i);
   }
-  if( cfg_mcast_intf && cfg_mcast == NULL )
+
+  if( cfg_mcast_intf[0] != NULL && cfg_mcast == NULL )
     cfg_mcast = "224.1.2.49";
 
   do_init();
-  client_send_opts(ss, server_core_i);
+  client_send_opts(ss);
   ctx = malloc(sizeof(*ctx));
   ctx->ss = ss;
   ctx->crx = client_rx_thread_start();
@@ -1475,10 +1476,10 @@ static int do_client2(int ss, const char* hostport, int local)
     int port = sfnt_sock_get_int(ss);
     char reply_hostport[80];
     NT_TRY2(ctx->write_fd, socket(PF_INET, SOCK_DGRAM, 0));
-    if( cfg_bindtodev )
-      NT_TRY(sfnt_so_bindtodevice(ctx->write_fd, cfg_bindtodev));
-    if( cfg_mcast_intf )
-      NT_TRY(sfnt_ip_multicast_if(ctx->write_fd, cfg_mcast_intf));
+    if( cfg_bindtodev[0] )
+      NT_TRY(sfnt_so_bindtodevice(ctx->write_fd, cfg_bindtodev[0]));
+    if( cfg_mcast_intf[0] )
+      NT_TRY(sfnt_ip_multicast_if(ctx->write_fd, cfg_mcast_intf[0]));
     if( cfg_mcast != NULL ) {
       NT_TRY(sfnt_connect(ctx->write_fd, cfg_mcast, NULL, port));
     }
@@ -1500,7 +1501,7 @@ static int do_client2(int ss, const char* hostport, int local)
   case FDT_PIPE:
     ctx->read_fd = the_fds[0];
     ctx->write_fd = the_fds[3];
-    if( cfg_spin ) {
+    if( cfg_spin[0] ) {
       sfnt_fd_set_nonblocking(ctx->read_fd);
       sfnt_fd_set_nonblocking(ctx->write_fd);
     }
@@ -1527,15 +1528,6 @@ static int do_client3(struct client_tx* ctx)
   sfnt_dump_sys_info(&tsc);
   printf("# server LD_PRELOAD=%s\n", ctx->server_ld_preload);
   sfnt_onload_info_dump(stdout, "# ");
-  printf("# options: %s%s%s\n",
-         cfg_connect ? "connect ":"",
-         cfg_spin ? "spin ":"",
-         cfg_rtt ? "rtt ":"");
-  printf("# muxer=%s serv-muxer=%s\n",
-         cfg_muxer, cfg_smuxer ? cfg_smuxer : cfg_muxer);
-  printf("# affinity=%s\n", cfg_affinity);
-  printf("# multicast=%s loop=%d\n",
-         cfg_mcast ? cfg_mcast : "NO", cfg_mcast_loop);
   printf("# percentile=%g\n", (double) cfg_percentile);
   fflush(stdout);
 
@@ -1579,7 +1571,7 @@ int main(int argc, char* argv[])
 {
   int rc = 0;
 
-  sfnt_app_getopt("[<tcp|udp|pipe|unix_stream|unix_datagram> [<host[:port]>]]",
+  sfnt_app_getopt("[tcp|udp|pipe|unix_stream|unix_datagram [host[:port]]]",
                 &argc, argv, cfg_opts, N_CFG_OPTS);
   --argc; ++argv;
 

@@ -39,24 +39,44 @@
  * Command line arg handling.
  */
 
-struct sfnt_cmd_line_opt {
-  char         short_name;
-  const char*  long_name;
-  unsigned int type;
-# define NT_CLO_FLAG   1
-# define NT_CLO_INT    2
-# define NT_CLO_UINT   3
-# define NT_CLO_STR    4
-# define NT_CLO_USAGE  5
-# define NT_CLO_FN     6
-# define NT_CLO_IRANGE 7
-# define NT_CLO_INT64  8
-# define NT_CLO_UINT64 9
-# define NT_CLO_FLOAT  10
-  void*        value;
-  const char*  usage;
-  void       (*fn)(const char*, const struct sfnt_cmd_line_opt*);
+enum sfnt_cla_flag {
+  SFNT_CLAF_FILL    = 0x1,      /* duplicate vals to end of array */
 };
+
+
+enum sfnt_cla_type {
+  SFNT_CLAT_FLAG,
+  SFNT_CLAT_INT,
+  SFNT_CLAT_UINT,
+  SFNT_CLAT_STR,
+  SFNT_CLAT_FN,
+  SFNT_CLAT_IRANGE,
+  SFNT_CLAT_INT64,
+  SFNT_CLAT_UINT64,
+  SFNT_CLAT_FLOAT,
+};
+
+
+struct sfnt_cmd_line_opt {
+  char               short_name;
+  const char*        long_name;
+  enum sfnt_cla_type type;
+  enum sfnt_cla_flag flags;
+  void*              value;
+  int                num;  /* number of values in array */
+  const char*        usage;
+  void             (*fn)(const char*, const struct sfnt_cmd_line_opt*);
+};
+
+
+#define SFNT_CLA(long, type, ptr, usage)                        \
+  { 0, (long), SFNT_CLAT_##type, 0, (ptr), 0, (usage), NULL }
+
+#define SFNT_CLA2(long, type, ptr, usage)                               \
+  { 0, (long), SFNT_CLAT_##type, SFNT_CLAF_FILL, (ptr), 2, (usage), NULL }
+
+#define SFNT_CLAS(short, long, type, ptr, usage)                        \
+  { (short), (long), SFNT_CLAT_##type, 0, (ptr), 0, (usage), NULL }
 
 
 /* Options that are always supported. */
