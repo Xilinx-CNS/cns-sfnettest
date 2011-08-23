@@ -1433,7 +1433,7 @@ static int do_client2(int ss, const char* hostport, int local)
   ctx->ss = ss;
   ctx->crx = client_rx_thread_start();
   ctx->rate_min = 50000;
-  ctx->rate_max = 5000000;
+  ctx->rate_max = 100000000;
   ctx->rate_step = 50000;
 
   if( cfg_rates != NULL ) {
