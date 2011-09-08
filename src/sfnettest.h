@@ -364,13 +364,23 @@ extern int sfnt_cpu_affinity_set(int core_i);
  * Misc. utility functions.
  */
 
+struct sfnt_ilist {
+  int* list;
+  int  len;
+  int  alloc_len;
+};
+
+extern void sfnt_ilist_init(struct sfnt_ilist* ilist);
+
+extern void sfnt_ilist_append(struct sfnt_ilist* ilist, int i);
+
 /* Parse a string that (hopefully) contains a comma separated list of
  * non-negative integers and/or ranges.  Returns 0 on success, -EINVAL if
- * malformed, -ENOMEM if can't allocate memory.  Caller should free() the
- * returned memory when done with it.
+ * the string is malformed.  The returned memory may be freed with free().
+ *
+ * [ilist] is assumed to point at an uninitialised sfnt_ilist.
  */
-extern int sfnt_parse_int_list(const char* int_list_str,
-                             int** int_list_out, int* int_list_len_out);
+extern int sfnt_ilist_parse(struct sfnt_ilist* ilist, const char* str);
 
 
 #endif  /* __NETTEST_H__ */

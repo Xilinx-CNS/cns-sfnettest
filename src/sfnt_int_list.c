@@ -29,49 +29,81 @@ static void skip_int_range(const char** ps)
 }
 
 
-int sfnt_parse_int_list(const char* int_list_str,
-                      int** int_list_out, int* int_list_len_out)
+static void skip_int_range2(const char** ps)
 {
-  int low, high;
-  int len = 0;
+  skip_int_range(ps);
+  ++(*ps);
+  skip_int(ps);
+}
+
+
+void sfnt_ilist_init(struct sfnt_ilist* ilist)
+{
+  ilist->alloc_len = 8;
+  ilist->len = 0;
+  ilist->list = malloc(ilist->alloc_len * sizeof(int));
+}
+
+
+void sfnt_ilist_append(struct sfnt_ilist* ilist, int i)
+{
+  NT_ASSERTi3(ilist->len, <=, ilist->alloc_len);
+  if( ilist->len == ilist->alloc_len ) {
+    ilist->alloc_len *= 2;
+    ilist->list = realloc(ilist->list, ilist->alloc_len * sizeof(int));
+  }
+  ilist->list[ilist->len++] = i;
+}
+
+
+int sfnt_ilist_parse(struct sfnt_ilist* ilist, const char* int_list_str)
+{
+  int low, high, step;
   int rc;
 
-  *int_list_out = NULL;
-  *int_list_len_out = 0;
+  sfnt_ilist_init(ilist);
 
   while( int_list_str[0] ) {
     if( int_list_str[0] == ',' ) {
       ++int_list_str;
       continue;
     }
-    if( sscanf(int_list_str, "%u-%u", &low, &high) == 2 ) {
-      if( high < low ) {
-        rc = -EINVAL;
-        goto fail;
-      }
-      *int_list_len_out += high - low + 1;
-      *int_list_out = realloc(*int_list_out, *int_list_len_out * sizeof(int));
+    if( sscanf(int_list_str, "%u-%u+%u", &low, &high, &step) == 3 ) {
+      if( high < low )
+        goto fail_einval;
+      do
+        sfnt_ilist_append(ilist, low);
+      while( (low += step) <= high );
+      skip_int_range2(&int_list_str);
+    }
+    else if( sscanf(int_list_str, "%u-%ux%u", &low, &high, &step) == 3 ) {
+      if( high < low )
+        goto fail_einval;
+      do
+        sfnt_ilist_append(ilist, low);
+      while( (low *= step) <= high );
+      skip_int_range2(&int_list_str);
+    }
+    else if( sscanf(int_list_str, "%u-%u", &low, &high) == 2 ) {
+      if( high < low )
+        goto fail_einval;
       while( low <= high )
-        (*int_list_out)[len++] = low++;
-      assert(len == *int_list_len_out);
+        sfnt_ilist_append(ilist, low++);
       skip_int_range(&int_list_str);
     }
     else if( sscanf(int_list_str, "%u-%u", &low, &high) == 1 ) {
-      *int_list_len_out += 1;
-      *int_list_out = realloc(*int_list_out, *int_list_len_out * sizeof(int));
-      (*int_list_out)[len++] = low;
+      sfnt_ilist_append(ilist, low);
       skip_int(&int_list_str);
     }
     else {
-      rc = -EINVAL;
-      goto fail;
+      goto fail_einval;
     }
   }
 
   return 0;
 
- fail:
-  free(*int_list_out);
-  *int_list_out = NULL;
+ fail_einval:
+  rc = -EINVAL;
+  free(ilist->list);
   return rc;
 }

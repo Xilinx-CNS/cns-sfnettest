@@ -15,7 +15,7 @@
 
 static int         cfg_port = 2048;
 static int         cfg_connect[2];
-static int         cfg_size = -1;
+static const char* cfg_sizes;
 static int         cfg_spin[2];
 static const char* cfg_muxer[2];
 static int         cfg_rtt;
@@ -61,7 +61,7 @@ static int         cfg_nodelay;
 
 static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1U("port",        cfg_port,        "server port#"                        ),
-  CL1U("size",        cfg_size,        "single message size (bytes)"         ),
+  CL1S("sizes",       cfg_sizes,       "message sizes (list or range)"       ),
   CL2F("connect",     cfg_connect,     "connect() UDP socket"                ),
   CL2F("spin",        cfg_spin,        "receive side should spin"            ),
   CL2S("muxer",       cfg_muxer,       "select, poll, epoll or none"         ),
@@ -938,11 +938,12 @@ static int do_client(int argc, char* argv[])
 
 static int do_client2(int ss, const char* hostport, int local)
 {
+  struct sfnt_ilist msg_sizes;
   int read_fd, write_fd;
   char* server_ld_preload;
   int msg_size;
   int* results;
-  int one = 1;
+  int i, one = 1;
 
   client_check_ver(ss);
 
@@ -1026,13 +1027,19 @@ static int do_client2(int ss, const char* hostport, int local)
       cfg_maxmsg = 32 * 1024;
   }
 
-  if( cfg_size > 0 )
-    do_test(ss, read_fd, write_fd, cfg_size, results);
+  if( cfg_sizes != NULL ) {
+    if( sfnt_ilist_parse(&msg_sizes, cfg_sizes) != 0 )
+      sfnt_fail_usage("ERROR: Malformed argument to option --sizes");
+  }
   else {
+    sfnt_ilist_init(&msg_sizes);
     for( msg_size = cfg_minmsg; msg_size <= cfg_maxmsg;
          msg_size = next_msg_size(msg_size) )
-      do_test(ss, read_fd, write_fd, msg_size, results);
+      sfnt_ilist_append(&msg_sizes, msg_size);
   }
+
+  for( i = 0; i < msg_sizes.len; ++i )
+    do_test(ss, read_fd, write_fd, msg_sizes.list[i], results);
 
   /* Tell server side to exit. */
   sfnt_sock_put_int(ss, 0);
