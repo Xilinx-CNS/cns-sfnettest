@@ -48,39 +48,49 @@ static int         cfg_nodelay;
 
 #define CL1(a, b, c, d)  SFNT_CLA(a, b, &(c), d)
 #define CL2(a, b, c, d)  SFNT_CLA2(a, b, &(c), d)
+#define CL1F(a, c, d)    CL1(a, FLAG, c, d)
+#define CL2F(a, c, d)    CL2(a, FLAG, c, d)
+#define CL1I(a, c, d)    CL1(a, INT, c, d)
+#define CL2I(a, c, d)    CL2(a, INT, c, d)
+#define CL1U(a, c, d)    CL1(a, UINT, c, d)
+#define CL2U(a, c, d)    CL2(a, UINT, c, d)
+#define CL1S(a, c, d)    CL1(a, STR, c, d)
+#define CL2S(a, c, d)    CL2(a, STR, c, d)
+#define CL1D(a, c, d)    CL1(a, FLOAT, c, d)
+#define CL2D(a, c, d)    CL2(a, FLOAT, c, d)
 
 static struct sfnt_cmd_line_opt cfg_opts[] = {
-  CL1("port",      UINT, cfg_port,      "server port#"                      ),
-  CL1("size",      UINT, cfg_size,      "single message size (bytes)"       ),
-  CL2("connect",   FLAG, cfg_connect,   "connect() UDP socket"              ),
-  CL2("spin",      FLAG, cfg_spin,      "receive side should spin"          ),
-  CL2("muxer",     STR,  cfg_muxer,     "select, poll, epoll or none"       ),
-  CL1("rtt",       FLAG, cfg_rtt,       "report round-trip-time"            ),
-  CL1("raw",       STR,  cfg_raw,       "dump raw results to files"         ),
-  CL1("percentile",FLOAT,cfg_percentile,"percentile"                        ),
-  CL1("minmsg",    INT,  cfg_minmsg,    "min message size"                  ),
-  CL1("maxmsg",    INT,  cfg_maxmsg,    "max message size"                  ),
-  CL1("minms",     INT,  cfg_minms,     "min time per msg size (ms)"        ),
-  CL1("maxms",     INT,  cfg_maxms,     "max time per msg size (ms)"        ),
-  CL1("miniter",   INT,  cfg_miniter,   "min iterations for result"         ),
-  CL1("maxiter",   INT,  cfg_maxiter,   "max iterations for result"         ),
-  CL1("mcast",     STR,  cfg_mcast,     "use multicast addressing"          ),
-  CL2("mcastintf", STR,  cfg_mcast_intf,"set multicast interface"           ),
-  CL2("mcastloop", FLAG, cfg_mcast_loop,"IP_MULTICAST_LOOP"                 ),
-  CL2("bindtodev", STR,  cfg_bindtodev, "SO_BINDTODEVICE"                   ),
-  CL1("forkboth",  FLAG, cfg_forkboth,  "fork client and server"            ),
-  CL2("n-pipe",    UINT, cfg_n_pipe,    "include pipes in fd set"           ),
-  CL2("n-unix-d",  UINT, cfg_n_unixd,   "include unix datagrams in fd set"  ),
-  CL2("n-unix-s",  UINT, cfg_n_unixs,   "include unix streams in fd set"    ),
-  CL2("n-udp",     UINT, cfg_n_udp,     "include UDP socks in fd set"       ),
-  CL2("n-tcpc",    UINT, cfg_n_tcpc,    "include TCP socks in fd set"       ),
-  CL2("n-tcpl",    UINT, cfg_n_tcpl,    "include TCP listeners in fds"      ),
-  CL1("tcpc-serv", STR,  cfg_tcpc_serv, "host:port for tcp conns"           ),
-  CL1("timeout",   UINT, cfg_timeout,   "socket SND?RECV timeout"           ),
-  CL2("affinity",  STR,  cfg_affinity,  "<client-core>;<server-core>"       ),
-  CL1("n-pings",   UINT, cfg_n_pings,   "number of ping messages"           ),
-  CL1("n-pongs",   UINT, cfg_n_pongs,   "number of pong messages"           ),
-  CL1("nodelay",   FLAG, cfg_nodelay,   "enable TCP_NODELAY"                ),
+  CL1U("port",        cfg_port,        "server port#"                        ),
+  CL1U("size",        cfg_size,        "single message size (bytes)"         ),
+  CL2F("connect",     cfg_connect,     "connect() UDP socket"                ),
+  CL2F("spin",        cfg_spin,        "receive side should spin"            ),
+  CL2S("muxer",       cfg_muxer,       "select, poll, epoll or none"         ),
+  CL1F("rtt",         cfg_rtt,         "report round-trip-time"              ),
+  CL1S("raw",         cfg_raw,         "dump raw results to files"           ),
+  CL1D("percentile",  cfg_percentile,  "percentile"                          ),
+  CL1I("minmsg",      cfg_minmsg,      "min message size"                    ),
+  CL1I("maxmsg",      cfg_maxmsg,      "max message size"                    ),
+  CL1I("minms",       cfg_minms,       "min time per msg size (ms)"          ),
+  CL1I("maxms",       cfg_maxms,       "max time per msg size (ms)"          ),
+  CL1I("miniter",     cfg_miniter,     "min iterations for result"           ),
+  CL1I("maxiter",     cfg_maxiter,     "max iterations for result"           ),
+  CL1S("mcast",       cfg_mcast,       "set multicast address"               ),
+  CL2S("mcastintf",   cfg_mcast_intf,  "set multicast interface"             ),
+  CL2F("mcastloop",   cfg_mcast_loop,  "IP_MULTICAST_LOOP"                   ),
+  CL2S("bindtodev",   cfg_bindtodev,   "SO_BINDTODEVICE"                     ),
+  CL1F("forkboth",    cfg_forkboth,    "fork client and server"              ),
+  CL2U("n-pipe",      cfg_n_pipe,      "include pipes in fd set"             ),
+  CL2U("n-unix-d",    cfg_n_unixd,     "include unix datagrams in fd set"    ),
+  CL2U("n-unix-s",    cfg_n_unixs,     "include unix streams in fd set"      ),
+  CL2U("n-udp",       cfg_n_udp,       "include UDP socks in fd set"         ),
+  CL2U("n-tcpc",      cfg_n_tcpc,      "include TCP socks in fd set"         ),
+  CL2U("n-tcpl",      cfg_n_tcpl,      "include TCP listeners in fds"        ),
+  CL1S("tcpc-serv",   cfg_tcpc_serv,   "host:port for tcp conns"             ),
+  CL1U("timeout",     cfg_timeout,     "socket SND?RECV timeout"             ),
+  CL2S("affinity",    cfg_affinity,    "<client-core>;<server-core>"         ),
+  CL1U("n-pings",     cfg_n_pings,     "number of ping messages"             ),
+  CL1U("n-pongs",     cfg_n_pongs,     "number of pong messages"             ),
+  CL1F("nodelay",     cfg_nodelay,     "enable TCP_NODELAY"                  ),
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 

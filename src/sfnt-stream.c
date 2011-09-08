@@ -47,36 +47,45 @@ static int         cfg_nodelay;
 
 #define CL1(a, b, c, d)  SFNT_CLA(a, b, &(c), d)
 #define CL2(a, b, c, d)  SFNT_CLA2(a, b, &(c), d)
+#define CL1F(a, c, d)    CL1(a, FLAG, c, d)
+#define CL2F(a, c, d)    CL2(a, FLAG, c, d)
+#define CL1I(a, c, d)    CL1(a, INT, c, d)
+#define CL2I(a, c, d)    CL2(a, INT, c, d)
+#define CL1U(a, c, d)    CL1(a, UINT, c, d)
+#define CL2U(a, c, d)    CL2(a, UINT, c, d)
+#define CL1S(a, c, d)    CL1(a, STR, c, d)
+#define CL2S(a, c, d)    CL2(a, STR, c, d)
+#define CL1D(a, c, d)    CL1(a, FLOAT, c, d)
+#define CL2D(a, c, d)    CL2(a, FLOAT, c, d)
 
 static struct sfnt_cmd_line_opt cfg_opts[] = {
-  CL1("msgsize",   UINT, cfg_msg_size,  "message size (bytes)"              ),
-  CL1("rates",     STR,  cfg_rates,     "set msg rates <min>-<max>[+<step>]"),
-  CL1("millisec",  UINT, cfg_millisec,  "time per test (millisec)"          ),
-  CL1("samples",   UINT, cfg_samples,   "samples per test"                  ),
-  CL1("stop",      UINT, cfg_stop,      "stop when TX rate achieved is below "
-                                        "given percentage of target"        ),
-  CL1("maxburst",  UINT, cfg_max_burst, "max burst length"                  ),
-  CL1("port",      UINT, cfg_port,      "server port#"                      ),
-  CL2("connect",   FLAG, cfg_connect,   "connect() UDP socket"              ),
-  CL2("spin",      FLAG, cfg_spin,      "spin on non-blocking recv()"       ),
-  CL2("muxer",     STR,  cfg_muxer,     "select, poll, epoll or none"       ),
-  CL1("rtt",       FLAG, cfg_rtt,       "report round-trip-time"            ),
-  CL1("raw",       STR,  cfg_raw,       "dump raw results to files"         ),
-  CL1("percentile",FLOAT,cfg_percentile,"percentile"                        ),
-  CL1("mcast",     STR,  cfg_mcast,     "use multicast addressing"          ),
-  CL2("mcastintf", STR,  cfg_mcast_intf,"set multicast interface"           ),
-  CL2("mcastloop", FLAG, cfg_mcast_loop,"IP_MULTICAST_LOOP"                 ),
-  CL2("bindtodev", STR,  cfg_bindtodev, "SO_BINDTODEVICE"                   ),
-  CL2("n-pipe",    UINT, cfg_n_pipe,    "include pipes in fd set"           ),
-  CL2("n-unix-d",  UINT, cfg_n_unixd,   "include unix dgram in fd set"      ),
-  CL2("n-unix-s",  UINT, cfg_n_unixs,   "include unix strm in fd set"       ),
-  CL2("n-udp",     UINT, cfg_n_udp,     "include UDP socks in fd set"       ),
-  CL2("n-tcpc",    UINT, cfg_n_tcpc,    "include TCP socks in fd set"       ),
-  CL2("n-tcpl",    UINT, cfg_n_tcpl,    "include TCP listeners in fds"      ),
-  CL1("tcpc-serv", STR,  cfg_tcpc_serv, "host:port for tcp conns"           ),
-  CL2("affinity",  STR,  cfg_affinity,  "<client-tx>,<client-rx>;"
-                                        "<server-core>"                     ),
-  CL1("nodelay",   FLAG, cfg_nodelay,   "enable TCP_NODELAY"                ),
+  CL1U("msgsize",     cfg_msg_size,    "message size (bytes)"                ),
+  CL1S("rates",       cfg_rates,       "set msg rates <min>-<max>[+<step>]"  ),
+  CL1U("millisec",    cfg_millisec,    "time per test (millisec)"            ),
+  CL1U("samples",     cfg_samples,     "samples per test"                    ),
+  CL1U("stop",        cfg_stop,        "stop when TX rate achieved is below"
+                                       " given percentage of target"         ),
+  CL1U("maxburst",    cfg_max_burst,   "max burst length"                    ),
+  CL1U("port",        cfg_port,        "server port#"                        ),
+  CL2F("connect",     cfg_connect,     "connect() UDP socket"                ),
+  CL2F("spin",        cfg_spin,        "spin on non-blocking recv()"         ),
+  CL2S("muxer",       cfg_muxer,       "select, poll, epoll or none"         ),
+  CL1F("rtt",         cfg_rtt,         "report round-trip-time"              ),
+  CL1S("raw",         cfg_raw,         "dump raw results to files"           ),
+  CL1D("percentile",  cfg_percentile,  "percentile"                          ),
+  CL1S("mcast",       cfg_mcast,       "set multicast address"               ),
+  CL2S("mcastintf",   cfg_mcast_intf,  "set multicast interface"             ),
+  CL2F("mcastloop",   cfg_mcast_loop,  "IP_MULTICAST_LOOP"                   ),
+  CL2S("bindtodev",   cfg_bindtodev,   "SO_BINDTODEVICE"                     ),
+  CL2U("n-pipe",      cfg_n_pipe,      "include pipes in fd set"             ),
+  CL2U("n-unix-d",    cfg_n_unixd,     "include unix dgram in fd set"        ),
+  CL2U("n-unix-s",    cfg_n_unixs,     "include unix strm in fd set"         ),
+  CL2U("n-udp",       cfg_n_udp,       "include UDP socks in fd set"         ),
+  CL2U("n-tcpc",      cfg_n_tcpc,      "include TCP socks in fd set"         ),
+  CL2U("n-tcpl",      cfg_n_tcpl,      "include TCP listeners in fds"        ),
+  CL1S("tcpc-serv",   cfg_tcpc_serv,   "host:port for tcp conns"             ),
+  CL2S("affinity",    cfg_affinity,    "<client-tx>,<client-rx>;<server>"    ),
+  CL1F("nodelay",     cfg_nodelay,     "enable TCP_NODELAY"                  ),
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
@@ -240,7 +249,6 @@ static int            select_fds[MAX_FDS];
 static int            select_n_fds;
 static int            select_max_fd;
 
-//??static struct sockaddr_in  peer_sa;
 static struct sockaddr*    to_sa;
 static socklen_t           to_sa_len;
 
