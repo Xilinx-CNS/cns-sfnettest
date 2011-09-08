@@ -19,7 +19,7 @@
 
 
 static int         cfg_msg_size = 24;
-static const char* cfg_rates;
+static const char* cfg_rates = "50000-100000000+50000";
 static int         cfg_millisec = 2000;
 static int         cfg_samples;
 static int         cfg_stop = 90;
@@ -60,7 +60,7 @@ static int         cfg_nodelay;
 
 static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1U("msgsize",     cfg_msg_size,    "message size (bytes)"                ),
-  CL1S("rates",       cfg_rates,       "set msg rates <min>-<max>[+<step>]"  ),
+  CL1S("rates",       cfg_rates,       "set msg rates <min>-<max>+<step>"    ),
   CL1U("millisec",    cfg_millisec,    "time per test (millisec)"            ),
   CL1U("samples",     cfg_samples,     "samples per test"                    ),
   CL1U("stop",        cfg_stop,        "stop when TX rate achieved is below"
@@ -175,9 +175,7 @@ struct client_rx {
 struct client_tx {
   int                   ss;
   struct client_rx*     crx;
-  int                   rate_min;
-  int                   rate_max;
-  int                   rate_step;
+  struct sfnt_ilist     rates;
   struct msg*           msg;
   int                   msg_len;
   uint32_t              next_seq;
@@ -1408,7 +1406,6 @@ static int do_client2(int ss, const char* hostport, int local)
 {
   struct client_tx* ctx;
   int one = 1;
-  char dummy;
 
   client_check_ver(ss);
 
@@ -1440,24 +1437,9 @@ static int do_client2(int ss, const char* hostport, int local)
   ctx = malloc(sizeof(*ctx));
   ctx->ss = ss;
   ctx->crx = client_rx_thread_start();
-  ctx->rate_min = 50000;
-  ctx->rate_max = 100000000;
-  ctx->rate_step = 50000;
 
-  if( cfg_rates != NULL ) {
-    if( sscanf(cfg_rates, "%d-%d+%d%c", &ctx->rate_min, &ctx->rate_max,
-               &ctx->rate_step, &dummy) == 3 ) {
-    }
-    else if( sscanf(cfg_rates, "%d-%d%c", &ctx->rate_min, &ctx->rate_max,
-                    &dummy) == 2 ) {
-      ctx->rate_step = ctx->rate_min;
-    }
-    else if( sscanf(cfg_rates, "%d%c", &ctx->rate_min, &dummy) == 1 ) {
-      ctx->rate_step = ctx->rate_min;
-    }
-    else
-      sfnt_fail_usage("Bad argument to --rates option.");
-  }
+  if( sfnt_ilist_parse(&ctx->rates, cfg_rates) != 0 )
+    sfnt_fail_usage("ERROR: Malformed argument to option --rates");
 
   ctx->server_ld_preload = sfnt_sock_get_str(ss);
 
@@ -1528,6 +1510,8 @@ static int do_client2(int ss, const char* hostport, int local)
 
 static int do_client3(struct client_tx* ctx)
 {
+  int i;
+
   NT_TESTi3(cfg_msg_size, >=, sizeof(struct msg));
 
   ctx->msg_len = cfg_msg_size;
@@ -1557,9 +1541,8 @@ static int do_client3(struct client_tx* ctx)
   sfnt_sock_put_int(ctx->ss, cfg_msg_size);
   sfnt_sock_get_int(ctx->ss);
 
-  for( ctx->msg_per_sec_target = ctx->rate_min;
-       ctx->msg_per_sec_target <= ctx->rate_max;
-       ctx->msg_per_sec_target += ctx->rate_step ) {
+  for( i = 0; i < ctx->rates.len; ++i ) {
+    ctx->msg_per_sec_target = ctx->rates.list[i];
     client_do_test(ctx);
     if( cfg_raw != NULL )
       write_raw_results(ctx);
