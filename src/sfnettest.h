@@ -54,6 +54,7 @@ enum sfnt_cla_type {
   SFNT_CLAT_INT64,
   SFNT_CLAT_UINT64,
   SFNT_CLAT_FLOAT,
+  SFNT_CLAT_USAGE,
 };
 
 

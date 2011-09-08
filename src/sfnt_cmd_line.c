@@ -12,11 +12,6 @@
 #include "sfnettest.h"
 
 
-enum {
-  SFNT_CLAT_USAGE = 100,
-};
-
-
 const char* sfnt_app_name;
 char*       sfnt_cmd_line;
 
