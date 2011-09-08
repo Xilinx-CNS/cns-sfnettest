@@ -23,17 +23,19 @@ void sfnt_dump_sys_info(const struct sfnt_tsc_params* tsc_opt)
 {
 #ifndef _WIN32
   const char* ld_preload;
-  int rc;
 
   if( sfnt_cmd_line )
     sfnt_out("# cmdline: %s\n", sfnt_cmd_line);
   sfnt_dump_ver_info(stdout, "# ");
-  rc = system("date | sed 's/^/# date: /'");
-  rc = system("uname -a | sed 's/^/# uname: /'");
-  rc = system("cat /proc/cpuinfo | grep 'model name'"
-              " | head -1 | sed 's/^/# cpu: /'");
-  rc = system("lspci -d 1924: | sed 's/^/# sfnics: /'");
-  rc = system("grep MemTotal /proc/meminfo | sed 's/^/# ram: /'");
+  system("date | sed 's/^/# date: /'");
+  system("uname -a | sed 's/^/# uname: /'");
+  system("cat /proc/cpuinfo | grep 'model name'"
+         " | head -1 | sed 's/^/# cpu: /'");
+  system("/sbin/lspci | grep -i net | sed 's/^/# lspci: /'");
+  system("for if in $(cd /sys/class/net && /bin/ls); do"
+         " ethtool -i $if 2>/dev/null | egrep 'bus-info|driver|^vers'"
+         " | sed \"s/^/# $if: /\"; done");
+  system("grep MemTotal /proc/meminfo | sed 's/^/# ram: /'");
   if( tsc_opt != NULL )
     sfnt_out("# tsc_hz: %"PRId64"\n", tsc_opt->hz);
   if( (ld_preload = getenv("LD_PRELOAD")) )
