@@ -612,7 +612,14 @@ static void udp_bind_sock(int us, int ss)
   if( cfg_mcast ) {
     if( cfg_mcast_intf[0] )
       NT_TRY(sfnt_ip_multicast_if(us, cfg_mcast_intf[0]));
-    NT_TRY(sfnt_ip_add_membership(us, inet_addr(cfg_mcast),cfg_mcast_intf[0]));
+    rc = sfnt_ip_add_membership(us, inet_addr(cfg_mcast),cfg_mcast_intf[0]);
+    if( rc != 0 ) {
+      sfnt_err("ERROR: failed to join '%s' on interface '%s'\n",
+               cfg_mcast, cfg_mcast_intf[0]);
+      sfnt_err("ERROR: rc=%d errno=(%d %s) gai_strerror=(%s)\n",
+               rc, errno, strerror(errno), gai_strerror(rc));
+      sfnt_fail_setup();
+    }
     NT_TRY(setsockopt(us, SOL_IP, IP_MULTICAST_LOOP,
                       &cfg_mcast_loop[0], sizeof(cfg_mcast_loop[0])));
     my_sa.sin_addr.s_addr = inet_addr(cfg_mcast);

@@ -713,7 +713,7 @@ static int do_server2(int ss)
 {
   struct server_per_client* client;
   struct server server;
-  int i, sock;
+  int rc, i, sock;
 
   server_check_ver(ss);
   server_recv_opts(ss);
@@ -743,8 +743,14 @@ static int do_server2(int ss)
     else
       sin.sin_addr.s_addr = inet_addr(cfg_mcast);
     NT_TRY(bind(sock, (const struct sockaddr*) &sin, sizeof(sin)));
-    NT_TRY(sfnt_ip_add_membership(sock, inet_addr(cfg_mcast),
-                                  cfg_mcast_intf[0]));
+    rc = sfnt_ip_add_membership(sock, inet_addr(cfg_mcast), cfg_mcast_intf[0]);
+    if( rc != 0 ) {
+      sfnt_err("ERROR: failed to join '%s' on interface '%s'\n",
+               cfg_mcast, cfg_mcast_intf[0]);
+      sfnt_err("ERROR: rc=%d errno=(%d %s) gai_strerror=(%s)\n",
+               rc, errno, strerror(errno), gai_strerror(rc));
+      sfnt_fail_setup();
+    }
   }
   else {
     NT_TRY(sfnt_bind_port(sock, 0));

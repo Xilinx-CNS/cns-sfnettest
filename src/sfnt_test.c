@@ -21,12 +21,12 @@ void sfnt_abort(void)
 void sfnt_fail_test(void)
 {
   sfnt_err("ERROR: Test failed.\n");
-  abort();
+  exit(3);
 }
 
 
 void sfnt_fail_setup(void)
 {
   sfnt_err("ERROR: Test setup failed.\n");
-  abort();
+  exit(2);
 }
