@@ -31,6 +31,7 @@ static int         cfg_forkboth;
 static const char* cfg_mcast;
 static const char* cfg_mcast_intf[2];
 static int         cfg_mcast_loop[2];
+static const char* cfg_bind[2];
 static const char* cfg_bindtodev[2];
 static unsigned    cfg_n_pipe[2];
 static unsigned    cfg_n_unixd[2];
@@ -77,6 +78,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1S("mcast",       cfg_mcast,       "set multicast address"               ),
   CL2S("mcastintf",   cfg_mcast_intf,  "set multicast interface"             ),
   CL2F("mcastloop",   cfg_mcast_loop,  "IP_MULTICAST_LOOP"                   ),
+  CL2S("bind",        cfg_bind,        "bind() socket"                       ),
   CL2S("bindtodev",   cfg_bindtodev,   "SO_BINDTODEVICE"                     ),
   CL1F("forkboth",    cfg_forkboth,    "fork client and server"              ),
   CL2U("n-pipe",      cfg_n_pipe,      "include pipes in fd set"             ),
@@ -134,6 +136,7 @@ static int            select_fds[MAX_FDS];
 static int            select_n_fds;
 static int            select_max_fd;
 
+static struct sockaddr_in  my_sa;
 static struct sockaddr_in  peer_sa;
 static struct sockaddr*    to_sa;
 static socklen_t           to_sa_len;
@@ -358,7 +361,7 @@ static void do_init(void)
     if( sfnt_cpu_affinity_set(core_i) != 0 ) {
       sfnt_err("ERROR: Failed to set CPU affinity to core %d (%d %s)\n",
                core_i, errno, strerror(errno));
-      sfnt_fail_test();
+      sfnt_fail_setup();
     }
 
   NT_TRY(sfnt_tsc_get_params(&tsc));
@@ -500,13 +503,13 @@ static void client_check_ver(int ss)
   if( strcmp(serv_ver, SFNT_VERSION) ) {
     sfnt_err("ERROR: Version mismatch: client=%s server=%s\n",
              SFNT_VERSION, serv_ver);
-    sfnt_fail_test();
+    sfnt_fail_setup();
   }
   if( strcmp(serv_csum, SFNT_SRC_CSUM) ) {
     sfnt_err("ERROR: Source Checksum mismatch:\n");
     sfnt_err("ERROR:     me=%s\n", SFNT_SRC_CSUM);
     sfnt_err("ERROR: server=%s\n", serv_csum);
-    sfnt_fail_test();
+    sfnt_fail_setup();
   }
 }
 
@@ -528,6 +531,7 @@ static void client_send_opts(int ss)
   sfnt_sock_put_str(ss, cfg_mcast_intf[1]);
   sfnt_sock_put_int(ss, cfg_mcast_loop[1]);
   sfnt_sock_put_str(ss, cfg_bindtodev[1]);
+  sfnt_sock_put_str(ss, cfg_bind[1]);
   sfnt_sock_put_int(ss, cfg_n_pipe[1]);
   sfnt_sock_put_int(ss, cfg_n_unixs[1]);
   sfnt_sock_put_int(ss, cfg_n_unixd[1]);
@@ -551,6 +555,7 @@ static void server_recv_opts(int ss)
   cfg_mcast_intf[0] = sfnt_sock_get_str(ss);
   cfg_mcast_loop[0] = sfnt_sock_get_int(ss);
   cfg_bindtodev[0] = sfnt_sock_get_str(ss);
+  cfg_bind[0] = sfnt_sock_get_str(ss);
   cfg_n_pipe[0] = sfnt_sock_get_int(ss);
   cfg_n_unixs[0] = sfnt_sock_get_int(ss);
   cfg_n_unixd[0] = sfnt_sock_get_int(ss);
@@ -564,48 +569,63 @@ static void server_recv_opts(int ss)
 }
 
 
-static void bind_udp_sock(int us, int ss)
+static void udp_bind_sock(int us, int ss)
 {
+  struct sockaddr_in ss_sa;
   struct sockaddr_in sa;
   socklen_t sa_len;
+  int rc, one = 1;
 
-  if( fd_type != FDT_UDP )
-    return;
+  sa_len = sizeof(sa);
+  NT_TRY(getsockname(ss, (struct sockaddr*) &ss_sa, &sa_len));
 
   if( cfg_bindtodev[0] )
     NT_TRY(sfnt_so_bindtodevice(us, cfg_bindtodev[0]));
 
-  if( cfg_mcast ) {
+  if( cfg_bind[0] ) {
+    NT_TRY(setsockopt(us, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)));
+    if( (rc = sfnt_bind(us, cfg_bind[0], NULL, -1)) != 0 ) {
+      sfnt_err("ERROR: Could not bind to '%s'\n", cfg_bind[0]);
+      sfnt_err("ERROR: rc=%d errno=(%d %s) gai_strerror=(%s)\n",
+               rc, errno, strerror(errno), gai_strerror(rc));
+      sfnt_fail_setup();
+    }
+  }
+  else if( cfg_mcast ) {
     sa.sin_family = AF_INET;
     sa.sin_port = 0;
     sa.sin_addr.s_addr = inet_addr(cfg_mcast);
     NT_TRY(bind(us, (struct sockaddr*) &sa, sizeof(sa)));
+  }
+  else {
+    /* Bind to same local interface as the setup socket. */
+    sa = ss_sa;
+    sa.sin_port = 0;
+    NT_TRY(bind(us, (struct sockaddr*) &sa, sizeof(sa)));
+  }
+
+  sa_len = sizeof(my_sa);
+  NT_TRY(getsockname(us, (struct sockaddr*) &my_sa, &sa_len));
+  if( my_sa.sin_addr.s_addr == 0 )
+    my_sa.sin_addr = ss_sa.sin_addr;
+
+  if( cfg_mcast ) {
     if( cfg_mcast_intf[0] )
       NT_TRY(sfnt_ip_multicast_if(us, cfg_mcast_intf[0]));
     NT_TRY(sfnt_ip_add_membership(us, inet_addr(cfg_mcast),cfg_mcast_intf[0]));
     NT_TRY(setsockopt(us, SOL_IP, IP_MULTICAST_LOOP,
                       &cfg_mcast_loop[0], sizeof(cfg_mcast_loop[0])));
+    my_sa.sin_addr.s_addr = inet_addr(cfg_mcast);
     sleep(cfg_mcast_sleep);
-  }
-  else {
-    /* Bind to same local interface as the setup socket. */
-    sa_len = sizeof(sa);
-    NT_TRY(getsockname(ss, (struct sockaddr*) &sa, &sa_len));
-    sa.sin_port = 0;
-    NT_TRY(bind(us, (struct sockaddr*) &sa, sizeof(sa)));
   }
 }
 
 
-static void exchange_addrs(int us, int ss)
+static void udp_exchange_addrs(int us, int ss)
 {
   /* Tell client our address, and get their's. */
 
-  struct sockaddr_in sa;
-  socklen_t sa_len = sizeof(sa);
-
-  NT_TRY(getsockname(us, (struct sockaddr*) &sa, &sa_len));
-  NT_TEST(send(ss, &sa, sizeof(sa), 0) == sizeof(sa));
+  NT_TEST(send(ss, &my_sa, sizeof(my_sa), 0) == sizeof(my_sa));
   NT_TEST(recv(ss, &peer_sa, sizeof(peer_sa), MSG_WAITALL) == sizeof(peer_sa));
 
   if( cfg_connect[0] ) {
@@ -687,8 +707,8 @@ static int do_server2(int ss)
   }
   case FDT_UDP:
     NT_TRY2(read_fd, socket(PF_INET, SOCK_DGRAM, 0));
-    bind_udp_sock(read_fd, ss);
-    exchange_addrs(read_fd, ss);
+    udp_bind_sock(read_fd, ss);
+    udp_exchange_addrs(read_fd, ss);
     write_fd = read_fd;
     break;
   case FDT_PIPE:
@@ -986,8 +1006,8 @@ static int do_client2(int ss, const char* hostport, int local)
   }
   case FDT_UDP:
     NT_TRY2(read_fd, socket(PF_INET, SOCK_DGRAM, 0));
-    bind_udp_sock(read_fd, ss);
-    exchange_addrs(read_fd, ss);
+    udp_bind_sock(read_fd, ss);
+    udp_exchange_addrs(read_fd, ss);
     write_fd = read_fd;
     break;
   case FDT_PIPE:

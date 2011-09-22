@@ -28,10 +28,12 @@ int sfnt_getaddrinfo(const char* host, const char* port, int port_i,
     }
     else if( (port = strrchr(host, ':')) != NULL ) {
       NT_ASSERT(sizeof(str) > (port - host));
-      strncpy(str, host, sizeof(str));
+      strcpy(str, host);
+      str[port - host] = '\0';
       host = str;
-      strrchr(host, ':')[0] = '\0';
       ++port;
+      if( host[0] == '\0' )
+        host = NULL;
     }
     else {
       sprintf(str, "0");
@@ -39,7 +41,7 @@ int sfnt_getaddrinfo(const char* host, const char* port, int port_i,
     }
   }
 
-  hints.ai_flags = AI_NUMERICSERV;
+  hints.ai_flags = AI_NUMERICSERV | AI_PASSIVE;
   hints.ai_family = AF_INET;
   hints.ai_socktype = 0;
   hints.ai_protocol = 0;
@@ -88,7 +90,7 @@ int sfnt_bind(int sock, const char* host_or_hostport,
   int rc;
 
   if( (rc = sfnt_getaddrinfo(host_or_hostport, port_or_null,
-                             port_i_or_neg, &ai)) < 0 )
+                             port_i_or_neg, &ai)) != 0 )
     return rc;
   rc = bind(sock, ai->ai_addr, ai->ai_addrlen);
   freeaddrinfo(ai);
@@ -103,7 +105,7 @@ int sfnt_connect(int sock, const char* host_or_hostport,
   int rc;
 
   if( (rc = sfnt_getaddrinfo(host_or_hostport, port_or_null,
-                             port_i_or_neg, &ai)) < 0 )
+                             port_i_or_neg, &ai)) != 0 )
     return rc;
   rc = connect(sock, ai->ai_addr, ai->ai_addrlen);
   freeaddrinfo(ai);
