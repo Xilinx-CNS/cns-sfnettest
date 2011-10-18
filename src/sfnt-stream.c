@@ -783,6 +783,31 @@ static int do_server2(int ss)
   return do_server3(&server);
 }
 
+/* return 0 if server->recv_size was set */
+static int get_recv_size(struct server* server)
+{
+  int32_t v32;
+  int rc;
+
+  rc = recv(server->ss, &v32, sizeof(v32), MSG_DONTWAIT);
+  if( rc == -1 && errno == EAGAIN ) {
+    /* Nothing here -- keep going. */
+  }
+  else if( rc == sizeof(v32) ) {
+    server->recv_size = NT_LE32(v32);
+    sfnt_sock_put_int(server->ss, 0);
+  }
+  else if( rc == 0 ) {
+    return 1;
+  }
+  else {
+    sfnt_err("sfnt-stream: server: error on control socket "
+	     "(rc=%d errno=%d %s)\n", rc, errno, strerror(errno));
+    exit(1);
+  }
+  return 0;
+}
+
 
 static int do_server3(struct server* server)
 {
@@ -794,6 +819,8 @@ static int do_server3(struct server* server)
 
   if( fd_type & FDTF_STREAM )
     flags |= MSG_WAITALL;
+
+  (void) get_recv_size(server);
 
   while( 1 ) {
     rc = mux_recv(server->read_fd, msg, server->recv_size, flags);
@@ -828,23 +855,8 @@ static int do_server3(struct server* server)
       }
     }
     else if( rc == -1 && errno == EAGAIN ) {
-      int32_t v32;
-      rc = recv(server->ss, &v32, sizeof(v32), MSG_DONTWAIT);
-      if( rc == -1 && errno == EAGAIN ) {
-        /* Nothing here -- keep going. */
-      }
-      else if( rc == sizeof(v32) ) {
-        server->recv_size = NT_LE32(v32);
-        sfnt_sock_put_int(server->ss, 0);
-      }
-      else if( rc == 0 ) {
-        break;
-      }
-      else {
-        sfnt_err("sfnt-stream: server: error on control socket "
-                 "(rc=%d errno=%d %s)\n", rc, errno, strerror(errno));
-        exit(1);
-      }
+      if (get_recv_size(server))
+	break;
     }
   }
 
