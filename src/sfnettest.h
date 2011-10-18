@@ -229,6 +229,17 @@ extern int64_t sfnt_tsc_usec(const struct sfnt_tsc_params*, int64_t tsc);
 /* Convert tsc delta to nanoseconds. */
 extern int64_t sfnt_tsc_nsec(const struct sfnt_tsc_params*, int64_t tsc);
 
+/* Convert milli-seconds delta to tsc. */
+extern int64_t sfnt_msec_tsc(const struct sfnt_tsc_params* params,
+			     int64_t msecs);
+
+/* Convert micro-seconds delta to tsc. */
+extern int64_t sfnt_usec_tsc(const struct sfnt_tsc_params* params,
+			     int64_t usecs);
+
+/* Convert nano-seconds delta to tsc. */
+extern int64_t sfnt_nsec_tsc(const struct sfnt_tsc_params* params,
+			     int64_t nsecs);
 
 /**********************************************************************
  * Statistics.

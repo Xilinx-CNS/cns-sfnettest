@@ -69,13 +69,36 @@ int sfnt_tsc_get_params(struct sfnt_tsc_params* params)
 }
 
 
+/* Convert tsc delta to microseconds. */
 int64_t sfnt_tsc_usec(const struct sfnt_tsc_params* params, int64_t tsc)
 {
   return tsc * 1000000 / params->hz;
 }
 
 
+/* Convert tsc delta to nanoseconds. */
 int64_t sfnt_tsc_nsec(const struct sfnt_tsc_params* params, int64_t tsc)
 {
   return tsc * 1000000000 / params->hz;
+}
+
+
+/* Convert milli-seconds delta to tsc. */
+int64_t sfnt_msec_tsc(const struct sfnt_tsc_params* params, int64_t msecs)
+{
+  return params->hz * msecs / 1000;
+}
+
+
+/* Convert micro-seconds delta to tsc. */
+int64_t sfnt_usec_tsc(const struct sfnt_tsc_params* params, int64_t usecs)
+{
+  return params->hz * usecs / 1000000;
+}
+
+
+/* Convert nano-seconds delta to tsc. */
+int64_t sfnt_nsec_tsc(const struct sfnt_tsc_params* params, int64_t nsecs)
+{
+  return params->hz * nsecs / 1000000000;
 }
