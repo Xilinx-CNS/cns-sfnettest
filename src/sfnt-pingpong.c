@@ -198,7 +198,6 @@ static ssize_t sfn_write(int fd, const void* buf, size_t len, int flags)
 
 static void select_init(void)
 {
-  NT_ASSERT(cfg_spin[0] == 0);  /* spin not yet supported with select */
   FD_ZERO(&select_fdset);
 }
 
@@ -214,13 +213,13 @@ static void select_add(int fd)
 
 static ssize_t select_recv(int fd, void* buf, size_t len, int flags)
 {
-  /* ?? TODO: spin variant */
   int i, rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   do {
     for( i = 0; i < select_n_fds; ++i )
       FD_SET(select_fds[i], &select_fdset);
-    rc = select(select_max_fd + 1, &select_fdset, NULL, NULL, NULL);
+    rc = sfnt_select(select_max_fd + 1, &select_fdset, NULL, NULL, &tsc,
+		     timeout_ms, flags);
     NT_TESTi3(rc, ==, 1);
     NT_TEST(FD_ISSET(fd, &select_fdset));
     if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
@@ -247,7 +246,8 @@ static ssize_t poll_recv(int fd, void* buf, size_t len, int flags)
   int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   do {
-    rc = sfnt_poll(pfds, pfds_n, timeout_ms, cfg_spin[0] ? NT_MUX_SPIN : 0);
+    rc = sfnt_poll(pfds, pfds_n, timeout_ms, &tsc,
+		   cfg_spin[0] ? NT_MUX_SPIN : 0);
     NT_TESTi3(rc, ==, 1);
     NT_TEST(pfds[0].revents & POLLIN);
     if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
@@ -282,7 +282,7 @@ static ssize_t epoll_recv(int fd, void* buf, size_t len, int flags)
   int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   do {
-    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, cfg_spin[0]);
+    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, cfg_spin[0]);
     NT_TESTi3(rc, ==, 1);
     NT_TEST(e.events & EPOLLIN);
     if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
@@ -300,7 +300,7 @@ static ssize_t epoll_mod_recv(int fd, void* buf, size_t len, int flags)
   e.events = EPOLLIN;
   NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &e));
   do {
-    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, cfg_spin[0]);
+    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, cfg_spin[0]);
     NT_TESTi3(rc, ==, 1);
     NT_TEST(e.events & EPOLLIN);
     if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
@@ -320,7 +320,7 @@ static ssize_t epoll_adddel_recv(int fd, void* buf, size_t len, int flags)
   e.events = EPOLLIN;
   NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &e));
   do {
-    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, cfg_spin[0]);
+    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, cfg_spin[0]);
     NT_TESTi3(rc, ==, 1);
     NT_TEST(e.events & EPOLLIN);
     if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )

@@ -267,17 +267,27 @@ enum sfnt_mux_flags {
   NT_MUX_SPIN     = 0x1,
 };
 
+/* Calls select().  Adds option to spin and continues to wait if interrupted
+ * by signal.
+ */
+extern int sfnt_select(int nfds, fd_set *readfds, fd_set *writefds,
+		fd_set *exceptfds, const struct sfnt_tsc_params* params,
+		int timeout_ms, enum sfnt_mux_flags flags);
+
 /* Calls poll().  Adds option to spin and continues to wait if interrupted
  * by signal.
  */
-extern int sfnt_poll(struct pollfd* fds, nfds_t nfds, int timeout,
-                   enum sfnt_mux_flags flags);
+extern int sfnt_poll(struct pollfd* fds, nfds_t nfds,
+		     int timeout, const struct sfnt_tsc_params* params,
+		     enum sfnt_mux_flags flags);
 
 /* Calls epoll_wait().  Adds option to spin and continues to wait if
  * interrupted by signal.
  */
 extern int sfnt_epoll_wait(int epfd, struct epoll_event* events,
-                         int maxevents, int timeout, enum sfnt_mux_flags flags);
+			   int maxevents, int timeout,
+			   const struct sfnt_tsc_params* params,
+			   enum sfnt_mux_flags flags);
 
 
 /**********************************************************************
