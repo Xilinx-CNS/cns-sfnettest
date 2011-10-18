@@ -1534,6 +1534,7 @@ static int do_client3(struct client_tx* ctx)
   printf("# msgsize=%d\n", cfg_msg_size);
   fflush(stdout);
 
+  /* Measure single-trip latency when quiescent */
   client_measure_rtt(ctx, &ctx->ret_lat_stats);
   stats_divide(&ctx->ret_lat_stats, 2);
   printf("# return_latency=%d\n", ctx->ret_lat_stats.mean);
@@ -1552,6 +1553,7 @@ static int do_client3(struct client_tx* ctx)
   sfnt_sock_put_int(ctx->ss, cfg_msg_size);
   sfnt_sock_get_int(ctx->ss);
 
+  /* the test proper */
   for( i = 0; i < ctx->rates.len; ++i ) {
     ctx->msg_per_sec_target = ctx->rates.list[i];
     client_do_test(ctx);
