@@ -480,18 +480,26 @@ static ssize_t epoll_adddel_recv(int fd, void* buf, size_t len, int flags)
 
 static ssize_t spin_recv(int fd, void* buf, size_t len, int flags)
 {
-  /* ?? FIXME: Implementation of timeout here is a dirty hack! */
-  int rc, got = 0, all = flags & MSG_WAITALL, i = 0;
+  int rc, got = 0, all = flags & MSG_WAITALL;
+  uint64_t tsc_now, tsc_timeout;
+
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
+
+  sfnt_tsc(&tsc_timeout);
+  tsc_timeout += sfnt_msec_tsc(&tsc, timeout_ms);
+
   do {
     while( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) < 0 )
       if( errno != EAGAIN ) {
         goto out;
       }
-      else if( timeout_ms && ++i > 10000000 ) {
-        errno = EAGAIN;
-        rc = -1;
-        break;
+      else {
+	sfnt_tsc(&tsc_now);
+	if( timeout_ms && tsc_now >= tsc_timeout ){
+	  errno = EAGAIN;
+	  rc = -1;
+	  break;
+	}
       }
     got += rc;
   } while( all && got < len && rc > 0 );
