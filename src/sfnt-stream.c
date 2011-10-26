@@ -17,8 +17,9 @@
  *  measure how long send call takes
  */
 
+#define DEFAULT_MSG_SIZE  24
 
-static int         cfg_msg_size = 24;
+static int         cfg_msg_size = DEFAULT_MSG_SIZE;
 static const char* cfg_rates = "50000-100000000+50000";
 static int         cfg_millisec = 2000;
 static int         cfg_samples;
@@ -1335,6 +1336,10 @@ static int do_client(int argc, char* argv[])
   const char* fd_type_s;
   pid_t pid;
 
+  if( cfg_msg_size < sizeof(struct msg) )
+    sfnt_fail_usage("ERROR: message size (--msgsize) too small (minimum "
+                    "is %d)", (int) sizeof(struct msg));
+
   if( argc < 1 || argc > 2 )
     sfnt_fail_usage(0);
   fd_type_s = argv[0];
@@ -1518,8 +1523,6 @@ static int do_client3(struct client_tx* ctx)
 {
   int i;
 
-  NT_TESTi3(cfg_msg_size, >=, sizeof(struct msg));
-
   ctx->msg_len = cfg_msg_size;
   ctx->msg = malloc(ctx->msg_len);
 
@@ -1527,6 +1530,7 @@ static int do_client3(struct client_tx* ctx)
   printf("# server LD_PRELOAD=%s\n", ctx->server_ld_preload);
   sfnt_onload_info_dump(stdout, "# ");
   printf("# percentile=%g\n", (double) cfg_percentile);
+  printf("# msgsize=%d\n", cfg_msg_size);
   fflush(stdout);
 
   client_measure_rtt(ctx, &ctx->ret_lat_stats);
@@ -1567,6 +1571,9 @@ static int do_client3(struct client_tx* ctx)
 int main(int argc, char* argv[])
 {
   int rc = 0;
+
+  /* fixme: this could be a compile-time check */
+  NT_TESTi3(DEFAULT_MSG_SIZE, >=, sizeof(struct msg));
 
   sfnt_app_getopt("[tcp|udp|pipe|unix_stream|unix_datagram [host[:port]]]",
                 &argc, argv, cfg_opts, N_CFG_OPTS);
