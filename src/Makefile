@@ -36,13 +36,40 @@ libsfnettest.a: $(NETTEST_SRCS:%=%.o)
 # the presence/version of OpenOnload.
 sfnt_sysinfo.o: CFLAGS += -fPIC
 
-$(APPS): LIBS := -L. -lsfnettest -lm -lrt
+
+# Set per OS flags
+ifeq ($(shell uname -s),Linux)
+OS_LINUX := 1
+MD5SUM := md5sum
+endif
+ifeq ($(shell uname -s),Darwin)
+OS_MACOSX := 1
+MD5SUM := md5
+endif
+ifeq ($(shell uname -s),SunOS)
+OS_SUNOS := 1
+MD5SUM := digest -a md5
+endif
+ifeq ($(shell uname -s),FreeBSD)
+OS_FREEBSD := 1
+MD5SUM := md5
+endif
+
+
+# Set libraries to link against
+LIBS := -L. -lsfnettest -lm 
+ifdef OS_SUNOS
+LIBS += -lsocket -lnsl
+endif
+ifndef OS_MACOSX
+LIBS += -lrt
+endif
 sfnt-stream: LIBS += -lpthread
 $(APPS): libsfnettest.a
 
 
 # TODO: Make this stuff VPATH friendly.
-SFNT_SRC_CSUM	:= $(shell cat *.c *.h | md5sum | sed 's/ .*//')
+SFNT_SRC_CSUM	:= $(shell find . -name '*.[ch]' | xargs cat | $(MD5SUM) | sed 's/ .*//')
 sinclude version.mk
 ifeq ($(SFNT_VERSION),)
 SFNT_VERSION	:= $(shell hg id --id 2>/dev/null || echo no-version)

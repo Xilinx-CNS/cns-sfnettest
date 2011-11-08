@@ -13,7 +13,7 @@
 #include "sfnettest.h"
 #include <sched.h>
 
-
+#ifdef __linux__
 int sfnt_cpu_affinity_set(int core_i)
 {
   cpu_set_t cset;
@@ -23,3 +23,13 @@ int sfnt_cpu_affinity_set(int core_i)
   CPU_SET(core_i, &cset);
   return sched_setaffinity(0, sizeof(cset), &cset);
 }
+#else
+int sfnt_cpu_affinity_set(int core_i)
+{
+  sfnt_err("ERROR: Process/thread affinity not currently supproted on this "
+	   "platform\n");
+  sfnt_fail_test();
+  /* not reached */
+  return -1;
+}
+#endif

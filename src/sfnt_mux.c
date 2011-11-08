@@ -11,7 +11,7 @@
 
 #include "sfnettest.h"
 
-
+#if NT_HAVE_POLL
 int sfnt_poll(struct pollfd* fds, nfds_t nfds, int timeout_ms,
 	      const struct sfnt_tsc_params* _tsc, enum sfnt_mux_flags flags)
 {
@@ -44,8 +44,10 @@ int sfnt_poll(struct pollfd* fds, nfds_t nfds, int timeout_ms,
 
   return rc;
 }
+#endif
 
 
+#if NT_HAVE_EPOLL
 int sfnt_epoll_wait(int epfd, struct epoll_event* events, int maxevents,
 		    int timeout_ms, const struct sfnt_tsc_params* _tsc,
 		    enum sfnt_mux_flags flags)
@@ -79,6 +81,7 @@ int sfnt_epoll_wait(int epfd, struct epoll_event* events, int maxevents,
 
   return rc;
 }
+#endif
 
 
 int sfnt_select(int nfds, fd_set *readfds, fd_set *writefds,

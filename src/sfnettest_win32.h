@@ -12,6 +12,7 @@
 #ifndef __NETTEST_WIN32_H__
 #define __NETTEST_WIN32_H__
 
+#define NT_SUPPORTS_ONLOAD 0
 
 #define NT_HAVE_POLL    0
 #define NT_HAVE_EPOLL   0

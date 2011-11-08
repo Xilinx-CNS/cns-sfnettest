@@ -11,17 +11,32 @@
 
 #include "sfnettest.h"
 #include <sys/ioctl.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 
 int sfnt_fd_set_nonblocking(int fd)
 {
+#if NT_HAVE_FIONBIO
   int nonblock = 1;
   return ioctl(fd, FIONBIO, &nonblock);
+#else
+  int flags = fcntl(fd, F_GETFL);
+  flags |= O_NONBLOCK;
+  return fcntl(fd, F_SETFL, flags);
+#endif
 }
 
 
 int sfnt_fd_set_blocking(int fd)
 {
+#if NT_HAVE_FIONBIO
   int nonblock = 0;
   return ioctl(fd, FIONBIO, &nonblock);
+#else
+  int flags = fcntl(fd, F_GETFL);
+  flags &= ~O_NONBLOCK;
+  return fcntl(fd, F_SETFL, flags);
+#endif
 }

@@ -42,9 +42,9 @@ int sfnt_getaddrinfo(const char* host, const char* port, int port_i,
   }
 
   hints.ai_flags = AI_NUMERICSERV | AI_PASSIVE;
-  hints.ai_family = AF_INET;
+  hints.ai_family = AF_INET; /* not AF_INET6 */
   hints.ai_socktype = 0;
-  hints.ai_protocol = 0;
+  hints.ai_protocol = IPPROTO_TCP;  /* Solaris compatability */
   hints.ai_addrlen = 0;
   hints.ai_addr = NULL;
   hints.ai_canonname = NULL;
@@ -113,6 +113,7 @@ int sfnt_connect(int sock, const char* host_or_hostport,
 }
 
 
+#if NT_HAVE_SO_BINDTODEVICE
 int sfnt_so_bindtodevice(int sock, const char* dev_name)
 {
   struct ifreq ifr;
@@ -120,51 +121,89 @@ int sfnt_so_bindtodevice(int sock, const char* dev_name)
   snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", dev_name);
   return setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof(ifr));
 }
+#else
+int sfnt_so_bindtodevice(int sock, const char* dev_name)
+{
+  sfnt_err("ERROR: SO_BINDTODEVICE requested but not supported on this "
+	   "platform\n");
+  sfnt_fail_test();
+  /* never reached */
+  return -1;
+}
+#endif
 
 
 int sfnt_ip_multicast_if(int sock, const char* intf)
 {
   struct addrinfo* ai;
+  struct in_addr sin;
+#if NT_HAVE_IP_MREQN
   struct ip_mreqn r;
+#else
+  struct ip_mreq r;
+#endif
   int rc;
 
   memset(&r, 0, sizeof(r));
+  memset(&sin, 0, sizeof(sin));
 
+#if NT_HAVE_IP_MREQN
   if( (rc = if_nametoindex(intf)) != 0 ) {
     r.imr_ifindex = rc;
-  }
-  else if( (rc = sfnt_getaddrinfo(intf, NULL, 0, &ai)) == 0 ) {
-    r.imr_address = ((struct sockaddr_in*) ai->ai_addr)->sin_addr;
+  } else
+  /* note hanging else */
+#endif
+  if( (rc = sfnt_getaddrinfo(intf, NULL, 0, &ai)) == 0 ) {
+    sin = ((struct sockaddr_in*) ai->ai_addr)->sin_addr;
     freeaddrinfo(ai);
   }
   else
     return rc;
 
+#if NT_HAVE_IP_MREQN
+  r.imr_address = sin;
   return setsockopt(sock, SOL_IP, IP_MULTICAST_IF, &r, sizeof(r));
+#else
+  return setsockopt(sock, SOL_IP, IP_MULTICAST_IF, &sin, sizeof(sin));  
+#endif
 }
 
 
 int sfnt_ip_add_membership(int sock, in_addr_t mcast_addr, const char* intf)
 {
   struct addrinfo* ai;
+  struct in_addr sin;
+#if NT_HAVE_IP_MREQN
   struct ip_mreqn r;
+#else
+  struct ip_mreq r;
+#endif
   int rc;
 
   memset(&r, 0, sizeof(r));
-  r.imr_multiaddr.s_addr = mcast_addr;
-
+  memset(&sin, 0, sizeof(sin));
+  
   if( intf != NULL ) {
+#if NT_HAVE_IP_MREQN
     if( (rc = if_nametoindex(intf)) != 0 ) {
       r.imr_ifindex = rc;
-    }
-    else if( (rc = sfnt_getaddrinfo(intf, NULL, 0, &ai)) == 0 ) {
-      r.imr_address = ((struct sockaddr_in*) ai->ai_addr)->sin_addr;
+    } else
+    /* note hanging else */
+#endif
+    if( (rc = sfnt_getaddrinfo(intf, NULL, 0, &ai)) == 0 ) {
+      sin = ((struct sockaddr_in*) ai->ai_addr)->sin_addr;
       freeaddrinfo(ai);
     }
     else
       return rc;
   }
 
+  r.imr_multiaddr.s_addr = mcast_addr;
+#if NT_HAVE_IP_MREQN
+  r.imr_address = sin;
+#else
+  r.imr_interface = sin;
+#endif
   return setsockopt(sock, SOL_IP, IP_ADD_MEMBERSHIP, &r, sizeof(r));
 }
 

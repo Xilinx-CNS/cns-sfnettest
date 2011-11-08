@@ -21,14 +21,16 @@ void sfnt_dump_ver_info(FILE* f, const char* pf)
 
 void sfnt_dump_sys_info(const struct sfnt_tsc_params* tsc_opt)
 {
-#ifndef _WIN32
   const char* ld_preload;
 
   if( sfnt_cmd_line )
     sfnt_out("# cmdline: %s\n", sfnt_cmd_line);
   sfnt_dump_ver_info(stdout, "# ");
+#if defined(__unix__) || defined(__APPLE__)
   system("date | sed 's/^/# date: /'");
   system("uname -a | sed 's/^/# uname: /'");
+#endif
+#ifdef __linux__
   system("cat /proc/cpuinfo | grep 'model name'"
          " | head -1 | sed 's/^/# cpu: /'");
   system("/sbin/lspci | grep -i net | sed 's/^/# lspci: /'");
@@ -36,15 +38,17 @@ void sfnt_dump_sys_info(const struct sfnt_tsc_params* tsc_opt)
          " ethtool -i $if 2>/dev/null | egrep 'bus-info|driver|^vers'"
          " | sed \"s/^/# $if: /\"; done");
   system("grep MemTotal /proc/meminfo | sed 's/^/# ram: /'");
+#endif
   if( tsc_opt != NULL )
     sfnt_out("# tsc_hz: %"PRId64"\n", tsc_opt->hz);
+#if defined(__unix__) || defined(__APPLE__)
   if( (ld_preload = getenv("LD_PRELOAD")) )
     sfnt_out("# LD_PRELOAD=%s\n", ld_preload);
 #endif
 }
 
 
-#ifndef _WIN32
+#if NT_SUPPORTS_ONLOAD
 /* If the onload library is present, and defines onload_version, then this
  * will resolve to the onload library.  Otherwise &onload_version will be
  * null (because it is weak and undefined).
@@ -56,7 +60,7 @@ extern char** environ;
 
 int sfnt_onload_is_active(void)
 {
-#ifndef _WIN32
+#if NT_SUPPORTS_ONLOAD
   const char* ld_preload;
   if( &onload_version )
     return 1;
@@ -73,7 +77,7 @@ int sfnt_onload_is_active(void)
 
 void sfnt_onload_info_dump(FILE* f, const char* pf)
 {
-#ifndef _WIN32
+#if NT_SUPPORTS_ONLOAD
   char** p;
 
   if( &onload_version )

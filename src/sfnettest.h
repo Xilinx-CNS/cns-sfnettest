@@ -22,7 +22,7 @@
 #include <math.h>
 #include <errno.h>
 
-#ifdef __unix__
+#if defined(__unix__) || defined(__APPLE__)
 # include "sfnettest_unix.h"
 #elif defined(_WIN32)
 # include "sfnettest_win32.h"
@@ -178,6 +178,16 @@ do {                                                    \
   }                                                     \
 } while(0)
 
+#define NT_TRY3(rc, expect, x)			            \
+do {                                                        \
+  if( ((rc) = (x)) != expect ) {                            \
+    sfnt_err("ERROR: at %s:%d\n", __FILE__, __LINE__);      \
+    sfnt_err("ERROR: %s failed\n", #x);                     \
+    sfnt_err("ERROR: rc=%d expect=%d errno=(%d %s)\n",      \
+	     (int) (rc), (expect), errno, strerror(errno)); \
+    sfnt_fail_test();                                       \
+  }                                                         \
+} while(0)
 
 /**********************************************************************
  * Information about the test environment.
@@ -281,6 +291,7 @@ extern int sfnt_poll(struct pollfd* fds, nfds_t nfds,
 		     int timeout, const struct sfnt_tsc_params* params,
 		     enum sfnt_mux_flags flags);
 
+#if NT_HAVE_EPOLL
 /* Calls epoll_wait().  Adds option to spin and continues to wait if
  * interrupted by signal.
  */
@@ -288,7 +299,7 @@ extern int sfnt_epoll_wait(int epfd, struct epoll_event* events,
 			   int maxevents, int timeout,
 			   const struct sfnt_tsc_params* params,
 			   enum sfnt_mux_flags flags);
-
+#endif
 
 /**********************************************************************
  * Socket convenience functions.

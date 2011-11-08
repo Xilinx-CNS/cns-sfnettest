@@ -612,7 +612,7 @@ static void udp_bind_sock(int us, int ss)
   if( cfg_mcast ) {
     if( cfg_mcast_intf[0] )
       NT_TRY(sfnt_ip_multicast_if(us, cfg_mcast_intf[0]));
-    rc = sfnt_ip_add_membership(us, inet_addr(cfg_mcast),cfg_mcast_intf[0]);
+    rc = sfnt_ip_add_membership(us, inet_addr(cfg_mcast), cfg_mcast_intf[0]);
     if( rc != 0 ) {
       sfnt_err("ERROR: failed to join '%s' on interface '%s'\n",
                cfg_mcast, cfg_mcast_intf[0]);
@@ -620,8 +620,12 @@ static void udp_bind_sock(int us, int ss)
                rc, errno, strerror(errno), gai_strerror(rc));
       sfnt_fail_setup();
     }
-    NT_TRY(setsockopt(us, SOL_IP, IP_MULTICAST_LOOP,
-                      &cfg_mcast_loop[0], sizeof(cfg_mcast_loop[0])));
+    {
+      /* Solaris requires this to be an unsigned char */
+      unsigned char loop = cfg_mcast_loop[0];
+      NT_TRY(setsockopt(us, SOL_IP, IP_MULTICAST_LOOP,
+			&loop, sizeof(loop)));
+    }
     my_sa.sin_addr.s_addr = inet_addr(cfg_mcast);
     sleep(cfg_mcast_sleep);
   }
@@ -895,7 +899,7 @@ static int do_client(int argc, char* argv[])
   pid_t pid;
 
   if( argc < 1 || argc > 2 )
-    sfnt_fail_usage(0);
+    sfnt_fail_usage("wrong number of arguments");
   fd_type_s = argv[0];
   if( ! strcasecmp(fd_type_s, "tcp") )
     fd_type = FDT_TCP;
@@ -908,12 +912,12 @@ static int do_client(int argc, char* argv[])
   else if( ! strcasecmp(fd_type_s, "unix_datagram") )
     fd_type = FDT_UNIX_D;
   else
-    sfnt_fail_usage(0);
+    sfnt_fail_usage("unknown fd_type '%s'", fd_type_s);
 
   if( fd_type & FDTF_LOCAL ) {
     int ss[2];
     if( argc != 1 )
-      sfnt_fail_usage(0);
+      sfnt_fail_usage("wrong number of arguments for local socket");
     switch( fd_type ) {
     case FDT_PIPE:
       NT_TRY(pipe(the_fds));
@@ -1091,7 +1095,7 @@ int main(int argc, char* argv[])
   NT_ASSERT(cfg_maxiter >= cfg_miniter);
   timeout_ms = cfg_timeout ? cfg_timeout * 1000 : -1;
 
-#ifdef __unix__
+#if defined(__unix__) ||  defined(__APPLE__)
   if( cfg_forkboth ) {
     NT_TRY2(pid, fork());
     if( pid == 0 )
@@ -1107,7 +1111,7 @@ int main(int argc, char* argv[])
   else
     rc = -do_client(argc, argv);
 
-#ifdef __unix__
+#if defined(__unix__) ||  defined(__APPLE__)
   if( pid ) {
     int status;
     kill(pid, SIGINT);

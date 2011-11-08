@@ -1,9 +1,13 @@
 
 CFLAGS		+= -Wall -Werror
 
+ifdef OS_LINUX
 # Add symbols to dynamic symbol table.  This is necessary to allow
 # detection of onload in sfnt_sysinfo.c
 CCLINKFLAGS	+= -Wl,-E
+else
+CCLINKFLAGS	+= -Wl
+endif
 
 
 # Disable built-in rules.

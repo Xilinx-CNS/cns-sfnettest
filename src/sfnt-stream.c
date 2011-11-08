@@ -901,7 +901,20 @@ static int client_rx_wait_sync(struct client_rx* crx, uint32_t seq,
    */
   struct timespec ts;
   int rc = 0;
-  clock_gettime(CLOCK_REALTIME, &ts);
+
+#ifdef __APPLE__
+  clock_serv_t cs;
+  mach_timespec_t mts;
+  kern_return_t kr;
+  NT_TRY3(kr, KERN_SUCCESS,
+	  host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cs));
+  NT_TRY3(kr, KERN_SUCCESS, clock_get_time(cs, &mts));
+  NT_TRY3(kr, KERN_SUCCESS, mach_port_deallocate(mach_task_self(), cs));
+  ts.tv_sec = mts.tv_sec;
+  ts.tv_nsec = mts.tv_nsec;
+#else
+  NT_TRY(clock_gettime(CLOCK_REALTIME, &ts));
+#endif
   ts.tv_nsec += timeout_millisec * 1000000;
   if( ts.tv_nsec > 1000000000 ) {
     ts.tv_nsec -= 1000000000;
@@ -1362,7 +1375,7 @@ static int do_client(int argc, char* argv[])
                     "is %d)", (int) sizeof(struct msg));
 
   if( argc < 1 || argc > 2 )
-    sfnt_fail_usage(0);
+    sfnt_fail_usage("wrong number of arguments");
   fd_type_s = argv[0];
   if( ! strcasecmp(fd_type_s, "tcp") )
     fd_type = FDT_TCP;
@@ -1375,7 +1388,7 @@ static int do_client(int argc, char* argv[])
   else if( ! strcasecmp(fd_type_s, "unix_datagram") )
     fd_type = FDT_UNIX_D;
   else
-    sfnt_fail_usage(0);
+    sfnt_fail_usage("unknown fd_type '%s'", fd_type_s);
 
   if( cfg_samples == 0 )
     /* Default to one latency sample per millisecond of test time. */
@@ -1384,7 +1397,7 @@ static int do_client(int argc, char* argv[])
   if( fd_type & FDTF_LOCAL ) {
     int ss[2];
     if( argc != 1 )
-      sfnt_fail_usage(0);
+      sfnt_fail_usage("wrong number of arguments for local socket");
     switch( fd_type ) {
     case FDT_PIPE:
       NT_TRY(pipe(the_fds));

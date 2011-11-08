@@ -197,7 +197,7 @@ static void bad_cla(const char* context, const char* cla, const char* msg)
 {
   sfnt_err("ERROR: bad %s option: %s\n", context, cla);
   if( msg )  sfnt_err("ERROR: %s\n", msg);
-  sfnt_fail_usage(NULL);
+  sfnt_fail_usage("bad option");
 }
 
 
