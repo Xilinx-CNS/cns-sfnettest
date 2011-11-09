@@ -357,12 +357,13 @@ static void do_init(void)
   unsigned core_i;
 
   /* Set affinity first to ensure optimal locality. */
-  if( sscanf(cfg_affinity[0], "%u", &core_i) == 1 )
-    if( sfnt_cpu_affinity_set(core_i) != 0 ) {
-      sfnt_err("ERROR: Failed to set CPU affinity to core %d (%d %s)\n",
-               core_i, errno, strerror(errno));
-      sfnt_fail_setup();
-    }
+  if( strcasecmp(cfg_affinity[0], "any") )
+    if( sscanf(cfg_affinity[0], "%u", &core_i) == 1 )
+      if( sfnt_cpu_affinity_set(core_i) != 0 ) {
+        sfnt_err("ERROR: Failed to set CPU affinity to core %d (%d %s)\n",
+                 core_i, errno, strerror(errno));
+        sfnt_fail_setup();
+      }
 
   NT_TRY(sfnt_tsc_get_params(&tsc));
 

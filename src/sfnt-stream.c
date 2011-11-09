@@ -731,7 +731,7 @@ static int do_server2(int ss)
 
   if( strcasecmp(cfg_affinity[0], "any") ) {
     int core_i;
-    if( sscanf(cfg_affinity[0], "%d", &core_i) != 1 )
+    if( sscanf(cfg_affinity[0], "%u", &core_i) != 1 )
       sfnt_fail_usage("ERROR: bad argument for --affinity");
     cpu_affinity_set(core_i);
   }
@@ -982,7 +982,8 @@ static void* client_rx_thread(void* arg)
   struct sockaddr_in sin;
 
   /* Set affinity first to ensure optimal locality. */
-  cpu_affinity_set(client_rx_core_i);
+  if( strcasecmp(cfg_affinity[0], "any") )
+    cpu_affinity_set(client_rx_core_i);
   crx->reply_buf_len = 64 * 1024;
   crx->reply = malloc(crx->reply_buf_len);
   switch( fd_type ) {
