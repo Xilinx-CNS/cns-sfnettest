@@ -41,7 +41,7 @@ int sfnt_getaddrinfo(const char* host, const char* port, int port_i,
     }
   }
 
-  hints.ai_flags = AI_NUMERICSERV | AI_PASSIVE;
+  hints.ai_flags = AI_PASSIVE; 
   hints.ai_family = AF_INET; /* not AF_INET6 */
   hints.ai_socktype = 0;
   hints.ai_protocol = IPPROTO_TCP;  /* Solaris compatability */
