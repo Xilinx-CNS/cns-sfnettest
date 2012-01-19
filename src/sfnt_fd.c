@@ -2,7 +2,7 @@
 *    Filename: sfnt_fd.c
 *      Author: David Riddoch <driddoch@solarflare.com>
 * Description: Convenience routines for managing file descriptors.
-*   Copyright: (C) 2005-2011 Solarflare Communications Inc.
+*   Copyright: (C) 2005-2012 Solarflare Communications Inc.
 *
 * This program is free software; you can redistribute it and/or modify it
 * under the terms of the GNU General Public License version 2 as published

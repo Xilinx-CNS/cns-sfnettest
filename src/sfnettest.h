@@ -1,16 +1,16 @@
 /**************************************************************************\
-*    Filename: sfnettest.c
+*    Filename: sfnettest.h
 *      Author: David Riddoch <driddoch@solarflare.com>
 * Description: sfnettest support library interface.
-*   Copyright: (C) 2005-2011 Solarflare Communications Inc.
+*   Copyright: (C) 2005-2012 Solarflare Communications Inc.
 *
 * This program is free software; you can redistribute it and/or modify it
 * under the terms of the GNU General Public License version 2 as published
 * by the Free Software Foundation, incorporated herein by reference.
 \**************************************************************************/
 
-#ifndef __NETTEST_H__
-#define __NETTEST_H__
+#ifndef __SFNETTEST_H__
+#define __SFNETTEST_H__
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -416,4 +416,4 @@ extern void sfnt_ilist_append(struct sfnt_ilist* ilist, int i);
 extern int sfnt_ilist_parse(struct sfnt_ilist* ilist, const char* str);
 
 
-#endif  /* __NETTEST_H__ */
+#endif  /* __SFNETTEST_H__ */
