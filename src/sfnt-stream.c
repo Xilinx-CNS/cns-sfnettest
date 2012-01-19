@@ -324,13 +324,13 @@ static void select_add(int fd)
 
 static ssize_t select_recv(int fd, void* buf, size_t len, int flags)
 {
-  /* ?? TODO: spin variant */
   int i, rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   do {
     for( i = 0; i < select_n_fds; ++i )
       FD_SET(select_fds[i], &select_fdset);
-    rc = select(select_max_fd + 1, &select_fdset, NULL, NULL, NULL);
+    rc = sfnt_select(select_max_fd + 1, &select_fdset, NULL, NULL, &tsc,
+                     timeout_ms, flags);
     NT_TESTi3(rc, ==, 1);
     NT_TEST(FD_ISSET(fd, &select_fdset));
     if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
