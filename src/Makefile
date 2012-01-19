@@ -81,5 +81,11 @@ endif
 CPPFLAGS	+= -DSFNT_VERSION='"$(SFNT_VERSION)"'
 CPPFLAGS	+= -DSFNT_SRC_CSUM='"$(SFNT_SRC_CSUM)"'
 
+# Define MSG_WAITALL_HACK to avoid using MSG_WAITALL, which is not
+# supported by at least one kernel-bypass stack.
+ifdef MSG_WAITALL_HACK
+CPPFLAGS	+= -include sfnettest_waitall_hack.h
+endif
+
 
 include rules.mk
