@@ -196,27 +196,12 @@ do {                                                        \
 /* Dump sfnettest version info. */
 extern void sfnt_dump_ver_info(FILE* f, const char* prefix);
 
-/* Dump generic information about the test environment.
+/* Dump information about the test environment.
  *
  * [tsc_opt] can be NULL.
  */
 struct sfnt_tsc_params;
 extern void sfnt_dump_sys_info(const struct sfnt_tsc_params* tsc_opt);
-
-/* Return true if the onload transport library is linked to this
- * application, or present in LD_PRELOAD.
- *
- * This is slightly unreliable -- it can return false for old versions of
- * onload when it is linked via /etc/ld.so.preload.  Also it can return
- * true if onload is present in LD_PRELOAD but for some reason not linked.
- */
-extern int sfnt_onload_is_active(void);
-
-/* Dump info about onload-related execution environment to given stream.
- * Includes value of LD_PRELOAD, onload version (if available) and onload
- * configuration options in the environment.
- */
-extern void sfnt_onload_info_dump(FILE* f, const char* prefix);
 
 
 /**********************************************************************
