@@ -1042,7 +1042,8 @@ static int do_client2(int ss, const char* hostport, int local)
   results = malloc(cfg_maxiter * sizeof(*results));
   NT_TEST(results != NULL);
   sfnt_dump_sys_info(&tsc);
-  printf("# server LD_PRELOAD=%s\n", server_ld_preload);
+  if( server_ld_preload != NULL )
+    printf("# server LD_PRELOAD=%s\n", server_ld_preload);
   printf("# percentile=%g\n", (double) cfg_percentile);
   printf("#\n");
   printf("#\tsize\tmean\tmin\tmedian\tmax\t%%ile\tstddev\titer\n");
