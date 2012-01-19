@@ -45,6 +45,7 @@ static unsigned    cfg_n_tcpl[2];
 static const char* cfg_tcpc_serv;
 static const char* cfg_affinity[2];
 static int         cfg_nodelay;
+static unsigned    cfg_rtt_iter = 10000;
 
 #define CL1(a, b, c, d)  SFNT_CLA(a, b, &(c), d)
 #define CL2(a, b, c, d)  SFNT_CLA2(a, b, &(c), d)
@@ -87,6 +88,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1S("tcpc-serv",   cfg_tcpc_serv,   "host:port for tcp conns"             ),
   CL2S("affinity",    cfg_affinity,    "<client-tx>,<client-rx>;<server>"    ),
   CL1F("nodelay",     cfg_nodelay,     "enable TCP_NODELAY"                  ),
+  CL1U("rtt-iter",    cfg_rtt_iter,    "iterations for RTT measurement"      ),
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
@@ -1042,6 +1044,8 @@ static struct client_rx* client_rx_thread_start(void)
   PT_CHK(pthread_mutex_init(&crx->lock, NULL));
   PT_CHK(pthread_cond_init(&crx->cond, NULL));
   crx->recs_max = cfg_samples * 3;
+  if( crx->recs_max < cfg_rtt_iter )
+    crx->recs_max = cfg_rtt_iter;
   crx->state = CRXC_NEW;
   crx->cmd = CRXC_WAIT;
   PT_CHK(pthread_create(&tid, NULL, client_rx_thread, crx));
@@ -1084,7 +1088,7 @@ static int client_sync(struct client_tx* ctx, enum msg_flags flags,
 static void client_warmup(struct client_tx* ctx, int n_warmups)
 {
   int i;
-  for( i = 0; i < 100/*??*/; ++i )
+  for( i = 0; i < n_warmups; ++i )
     if( client_sync(ctx, MF_RESET, 1000) != 0 ) {
       sfnt_err("ERROR: Timeout waiting for synchronisation message\n");
       sfnt_fail_test();
@@ -1310,11 +1314,11 @@ static void client_measure_rtt(struct client_tx* ctx, struct stats* stats)
   sfnt_sock_get_int(ctx->ss);
 
   /* Start-up the client RX thread and warmup. */
-  client_start(ctx, 100/*??*/);
+  client_start(ctx, cfg_rtt_iter);
 
   crx->sync_seq = ctx->next_seq - 1;
   msg->flags = MF_SAVE | MF_RESET | MF_SYNC;
-  for( i = 0; i < 1000/*??*/; ++i ) {
+  for( i = 0; i < cfg_rtt_iter; ++i ) {
     seq = ctx->next_seq++;
     msg->seq = NT_LE32(seq);
     ++msg->reply_seq;
