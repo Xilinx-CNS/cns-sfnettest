@@ -26,19 +26,21 @@ void sfnt_dump_sys_info(const struct sfnt_tsc_params* tsc_opt)
   if( sfnt_cmd_line )
     sfnt_out("# cmdline: %s\n", sfnt_cmd_line);
   sfnt_dump_ver_info(stdout, "# ");
+  if( ! getenv("SFNT_AVOID_FORK") ) {
 #if defined(__unix__) || defined(__APPLE__)
-  system("date | sed 's/^/# date: /'");
-  system("uname -a | sed 's/^/# uname: /'");
+    system("date | sed 's/^/# date: /'");
+    system("uname -a | sed 's/^/# uname: /'");
 #endif
 #ifdef __linux__
-  system("cat /proc/cpuinfo | grep 'model name'"
-         " | head -1 | sed 's/^/# cpu: /'");
-  system("/sbin/lspci | grep -i net | sed 's/^/# lspci: /'");
-  system("for if in $(cd /sys/class/net && /bin/ls); do"
-         " ethtool -i $if 2>/dev/null | egrep 'bus-info|driver|^vers'"
-         " | sed \"s/^/# $if: /\"; done");
-  system("grep MemTotal /proc/meminfo | sed 's/^/# ram: /'");
+    system("cat /proc/cpuinfo | grep 'model name'"
+           " | head -1 | sed 's/^/# cpu: /'");
+    system("/sbin/lspci | grep -i net | sed 's/^/# lspci: /'");
+    system("for if in $(cd /sys/class/net && /bin/ls); do"
+           " ethtool -i $if 2>/dev/null | egrep 'bus-info|driver|^vers'"
+           " | sed \"s/^/# $if: /\"; done");
+    system("grep MemTotal /proc/meminfo | sed 's/^/# ram: /'");
 #endif
+  }
   if( tsc_opt != NULL )
     sfnt_out("# tsc_hz: %"PRId64"\n", tsc_opt->hz);
 #if defined(__unix__) || defined(__APPLE__)
