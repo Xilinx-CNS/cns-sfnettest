@@ -29,7 +29,9 @@ static uint64_t measure_hz(int interval_usec)
     gettimeofday(&tv_s, NULL);
     sfnt_tsc(&tsc_e2);
     tsc_gtod = tsc_e2 - tsc_s;
-  } while( ++n < 5 || (tsc_gtod > min_tsc_gtod * 5 / 4 && n < 100) );
+    if( tsc_gtod < min_tsc_gtod )
+      min_tsc_gtod = tsc_gtod;
+  } while( ++n < 20 || (tsc_gtod > min_tsc_gtod * 2 && n < 100) );
 
   do {
     sfnt_tsc(&tsc_e);
@@ -40,11 +42,9 @@ static uint64_t measure_hz(int interval_usec)
       break;
     }
     tsc_gtod = tsc_e2 - tsc_e;
-    if( tsc_gtod < min_tsc_gtod )
-      min_tsc_gtod = tsc_gtod;
     usec = (tv_e.tv_sec - tv_s.tv_sec) * (uint64_t) 1000000;
     usec += tv_e.tv_usec - tv_s.tv_usec;
-  } while( usec < interval_usec || tsc_gtod > min_tsc_gtod * 5 / 4 );
+  } while( usec < interval_usec || tsc_gtod > min_tsc_gtod * 2 );
 
   /* ?? TODO: handle this better */
   NT_TEST(skew == 0);
