@@ -69,7 +69,8 @@ $(APPS): libsfnettest.a
 
 
 # TODO: Make this stuff VPATH friendly.
-SFNT_SRC_CSUM	:= $(shell find . -name '*.[ch]' | xargs cat | $(MD5SUM) | sed 's/ .*//')
+SFNT_SRC_CSUM	:= $(shell find . -name '*.[ch]' | LC_ALL=C sort | \
+                             xargs cat | $(MD5SUM) | sed 's/ .*//')
 sinclude version.mk
 ifeq ($(SFNT_VERSION),)
 SFNT_VERSION	:= $(shell hg id --id 2>/dev/null || echo no-version)
