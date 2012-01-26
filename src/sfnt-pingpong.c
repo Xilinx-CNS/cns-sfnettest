@@ -182,7 +182,7 @@ static ssize_t rfn_read(int fd, void* buf, size_t len, int flags)
   /* NB. To support non-blocking semantics caller must have set O_NONBLOCK. */
   int rc, got = 0, all = flags & MSG_WAITALL;
   do {
-    if( (rc = read(fd, (char*) buf + got, len)) > 0 )
+    if( (rc = read(fd, (char*) buf + got, len - got)) > 0 )
       got += rc;
   } while( all && got < len && rc > 0 );
   return got ? got : rc;

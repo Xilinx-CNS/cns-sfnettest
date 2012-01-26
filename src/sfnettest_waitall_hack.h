@@ -23,7 +23,7 @@ sfnt_recv_waitall_hack(int fd, void* buf, size_t len, int flags)
   int rc, got = 0, all = flags & MSG_WAITALL;
   flags &= ~MSG_WAITALL;
   do {
-    if( (rc = recv(fd, (char*) buf + got, len, flags)) > 0 )
+    if( (rc = recv(fd, (char*) buf + got, len - got, flags)) > 0 )
       got += rc;
   } while( all && got < len && rc > 0 );
   return got ? got : rc;
@@ -40,7 +40,8 @@ sfnt_recvfrom_waitall_hack(int fd, void* buf, size_t len, int flags,
   int rc, got = 0, all = flags & MSG_WAITALL;
   flags &= ~MSG_WAITALL;
   do {
-    if( (rc = recvfrom(fd, (char*) buf + got, len, flags, from, fromlen)) > 0 )
+    if( (rc = recvfrom(fd, (char*) buf + got, len - got,
+                       flags, from, fromlen)) > 0 )
       got += rc;
   } while( all && got < len && rc > 0 );
   return got ? got : rc;
@@ -57,7 +58,7 @@ sfnt_recvmsg_waitall_hack(int s, struct msghdr *msg, int flags)
   int rc, got = 0, all = flags & MSG_WAITALL;
   flags &= ~MSG_WAITALL;
   do {
-    if( (rc = recvmsg(fd, (char*) buf + got, len, flags)) > 0 )
+    if( (rc = recvmsg(fd, (char*) buf + got, len - got, flags)) > 0 )
       got += rc;
   } while( all && got < len && rc > 0 );
   return got ? got : rc;
