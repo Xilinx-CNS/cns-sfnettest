@@ -1096,10 +1096,11 @@ static void client_warmup(struct client_tx* ctx, int n_warmups)
 }
 
 
-static void client_start(struct client_tx* ctx, int warmup_n)
+static void client_start(struct client_tx* ctx, int warmup_n, int msg_len)
 {
   NT_TESTi3(ctx->crx->cmd, ==, CRXC_WAIT);
   client_rx_cmd_set(ctx->crx, CRXC_GO);
+  ctx->msg_len = msg_len;
   ctx->next_seq = 0;
   client_warmup(ctx, warmup_n);
 }
@@ -1234,7 +1235,7 @@ static void client_do_test(struct client_tx* ctx)
   int rc;
 
   /* Start-up the client RX thread and warmup. */
-  client_start(ctx, 100/*??*/);
+  client_start(ctx, 100/*??*/, cfg_msg_size);
 
   /* Get ready. */
   ctx->reply_every = (int) ((uint64_t) ctx->msg_per_sec_target * cfg_millisec
@@ -1314,7 +1315,7 @@ static void client_measure_rtt(struct client_tx* ctx, struct stats* stats)
   sfnt_sock_get_int(ctx->ss);
 
   /* Start-up the client RX thread and warmup. */
-  client_start(ctx, cfg_rtt_iter);
+  client_start(ctx, cfg_rtt_iter, msg_len);
 
   crx->sync_seq = ctx->next_seq - 1;
   msg->flags = MF_SAVE | MF_RESET | MF_SYNC;
@@ -1562,8 +1563,7 @@ static int do_client3(struct client_tx* ctx)
 {
   int i;
 
-  ctx->msg_len = cfg_msg_size;
-  ctx->msg = malloc(ctx->msg_len);
+  ctx->msg = malloc(64 * 1024);
 
   sfnt_dump_sys_info(&tsc);
   if( ctx->server_ld_preload != NULL )
