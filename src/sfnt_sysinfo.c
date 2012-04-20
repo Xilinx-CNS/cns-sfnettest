@@ -12,11 +12,7 @@
 #include "sfnettest.h"
 
 
-void sfnt_dump_ver_info(FILE* f, const char* pf)
-{
-  sfnt_flog(f, "%sversion: %s\n", pf, SFNT_VERSION);
-  sfnt_flog(f, "%ssrc: %s\n", pf, SFNT_SRC_CSUM);
-}
+extern char** environ;
 
 
 #if NT_SUPPORTS_ONLOAD
@@ -25,13 +21,19 @@ void sfnt_dump_ver_info(FILE* f, const char* pf)
  * null (because it is weak and undefined).
  */
 extern const char*const onload_version __attribute__((weak));
-extern char** environ;
 #endif
 
 
+void sfnt_dump_ver_info(FILE* f, const char* pf)
+{
+  sfnt_flog(f, "%sversion: %s\n", pf, SFNT_VERSION);
+  sfnt_flog(f, "%ssrc: %s\n", pf, SFNT_SRC_CSUM);
+}
+
+
+#if NT_SUPPORTS_ONLOAD
 static int sfnt_onload_is_active(void)
 {
-#if NT_SUPPORTS_ONLOAD
   const char* ld_preload;
   if( &onload_version )
     return 1;
@@ -40,10 +42,8 @@ static int sfnt_onload_is_active(void)
     return 0;
   return strstr(ld_preload, "libcitransport") != NULL
     ||   strstr(ld_preload, "libonload") != NULL;
-#else
-  return 0;
-#endif
 }
+#endif
 
 
 #if defined(__unix__) || defined(__APPLE__)
