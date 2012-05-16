@@ -31,6 +31,7 @@ static int         cfg_forkboth;
 static const char* cfg_mcast;
 static const char* cfg_mcast_intf[2];
 static int         cfg_mcast_loop[2];
+static int         cfg_ttl[2] = { 1, 1 };
 static const char* cfg_bind[2];
 static const char* cfg_bindtodev[2];
 static unsigned    cfg_n_pipe[2];
@@ -78,6 +79,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1S("mcast",       cfg_mcast,       "set multicast address"               ),
   CL2S("mcastintf",   cfg_mcast_intf,  "set multicast interface"             ),
   CL2F("mcastloop",   cfg_mcast_loop,  "IP_MULTICAST_LOOP"                   ),
+  CL2F("ttl",         cfg_ttl,         "IP_TTL and IP_MULTICAST_TTL"         ),
   CL2S("bind",        cfg_bind,        "bind() socket"                       ),
   CL2S("bindtodev",   cfg_bindtodev,   "SO_BINDTODEVICE"                     ),
   CL1F("forkboth",    cfg_forkboth,    "fork client and server"              ),
@@ -531,6 +533,7 @@ static void client_send_opts(int ss)
   sfnt_sock_put_str(ss, cfg_mcast);
   sfnt_sock_put_str(ss, cfg_mcast_intf[1]);
   sfnt_sock_put_int(ss, cfg_mcast_loop[1]);
+  sfnt_sock_put_int(ss, cfg_ttl[1]);
   sfnt_sock_put_str(ss, cfg_bindtodev[1]);
   sfnt_sock_put_str(ss, cfg_bind[1]);
   sfnt_sock_put_int(ss, cfg_n_pipe[1]);
@@ -555,6 +558,7 @@ static void server_recv_opts(int ss)
   cfg_mcast = sfnt_sock_get_str(ss);
   cfg_mcast_intf[0] = sfnt_sock_get_str(ss);
   cfg_mcast_loop[0] = sfnt_sock_get_int(ss);
+  cfg_ttl[0] = sfnt_sock_get_int(ss);
   cfg_bindtodev[0] = sfnt_sock_get_str(ss);
   cfg_bind[0] = sfnt_sock_get_str(ss);
   cfg_n_pipe[0] = sfnt_sock_get_int(ss);
@@ -574,8 +578,9 @@ static void udp_bind_sock(int us, int ss)
 {
   struct sockaddr_in ss_sa;
   struct sockaddr_in sa;
+  unsigned char uc;
   socklen_t sa_len;
-  int rc, one = 1;
+  int i, rc, one = 1;
 
   sa_len = sizeof(sa);
   NT_TRY(getsockname(ss, (struct sockaddr*) &ss_sa, &sa_len));
@@ -621,12 +626,13 @@ static void udp_bind_sock(int us, int ss)
                rc, errno, strerror(errno), gai_strerror(rc));
       sfnt_fail_setup();
     }
-    {
-      /* Solaris requires this to be an unsigned char */
-      unsigned char loop = cfg_mcast_loop[0];
-      NT_TRY(setsockopt(us, SOL_IP, IP_MULTICAST_LOOP,
-			&loop, sizeof(loop)));
-    }
+    /* Solaris requires this to be an unsigned char */
+    uc = cfg_mcast_loop[0];
+    NT_TRY(setsockopt(us, SOL_IP, IP_MULTICAST_LOOP, &uc, sizeof(uc)));
+    i = cfg_ttl[0];
+    if( cfg_ttl[0] )
+      NT_TRY(setsockopt(us, SOL_IP, IP_TTL, &i, sizeof(i)));
+    NT_TRY(setsockopt(us, SOL_IP, IP_MULTICAST_TTL, &i, sizeof(i)));
     my_sa.sin_addr.s_addr = inet_addr(cfg_mcast);
     sleep(cfg_mcast_sleep);
   }
