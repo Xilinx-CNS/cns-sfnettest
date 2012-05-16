@@ -389,8 +389,8 @@ static int parse_cfg_opt(int argc, char** argv, const char* context)
       ++((int*) a->value)[i];
   }
   else {
-    NT_TEST((a->flags & SFNT_CLAF_FILL) == 0);
     cla_get_val(context, opt_name, a, 0, val);
+    NT_TEST((a->flags & SFNT_CLAF_FILL) == 0);
   }
 
   return result;
