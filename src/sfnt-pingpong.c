@@ -45,7 +45,7 @@ static unsigned    cfg_timeout;
 static const char* cfg_affinity[2];
 static int         cfg_n_pings = 1;
 static int         cfg_n_pongs = 1;
-static int         cfg_nodelay;
+static int         cfg_nodelay[2];
 
 #define CL1(a, b, c, d)  SFNT_CLA(a, b, &(c), d)
 #define CL2(a, b, c, d)  SFNT_CLA2(a, b, &(c), d)
@@ -92,7 +92,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL2S("affinity",    cfg_affinity,    "<client-core>;<server-core>"         ),
   CL1U("n-pings",     cfg_n_pings,     "number of ping messages"             ),
   CL1U("n-pongs",     cfg_n_pongs,     "number of pong messages"             ),
-  CL1F("nodelay",     cfg_nodelay,     "enable TCP_NODELAY"                  ),
+  CL2F("nodelay",     cfg_nodelay,     "enable TCP_NODELAY"                  ),
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
@@ -542,7 +542,7 @@ static void client_send_opts(int ss)
   sfnt_sock_put_str(ss, cfg_affinity[1]);
   sfnt_sock_put_int(ss, cfg_n_pings);
   sfnt_sock_put_int(ss, cfg_n_pongs);
-  sfnt_sock_put_int(ss, cfg_nodelay);
+  sfnt_sock_put_int(ss, cfg_nodelay[1]);
 }
 
 
@@ -566,7 +566,7 @@ static void server_recv_opts(int ss)
   cfg_affinity[0] = sfnt_sock_get_str(ss);
   cfg_n_pings = sfnt_sock_get_int(ss);
   cfg_n_pongs = sfnt_sock_get_int(ss);
-  cfg_nodelay = sfnt_sock_get_int(ss);
+  cfg_nodelay[0] = sfnt_sock_get_int(ss);
 }
 
 
@@ -692,6 +692,7 @@ static int do_server2(int ss)
 {
   int sl, iter, msg_size;
   int read_fd, write_fd;
+  int one = 1;
 
   server_check_ver(ss);
   server_recv_opts(ss);
@@ -712,6 +713,8 @@ static int do_server2(int ss)
     NT_TRY(getsockname(sl, (struct sockaddr*) &sa, &sa_len));
     sfnt_sock_put_int(ss, ntohs(sa.sin_port));
     NT_TRY2(read_fd, accept(sl, NULL, NULL));
+    if( cfg_nodelay[0] )
+      NT_TRY(setsockopt(read_fd, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
     write_fd = read_fd;
     close(sl);
     sl = -1;
@@ -1010,7 +1013,7 @@ static int do_client2(int ss, const char* hostport, int local)
       *p = '\0';
     int port = sfnt_sock_get_int(ss);
     NT_TRY2(read_fd, socket(PF_INET, SOCK_STREAM, 0));
-    if( cfg_nodelay )
+    if( cfg_nodelay[0] )
       NT_TRY(setsockopt(read_fd, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
     NT_TRY(sfnt_connect(read_fd, host, NULL, port));
     write_fd = read_fd;
