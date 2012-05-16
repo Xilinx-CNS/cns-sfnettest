@@ -353,6 +353,16 @@ static ssize_t spin_recv(int fd, void* buf, size_t len, int flags)
 
 /**********************************************************************/
 
+static void set_ttl(int sock, int ttl)
+{
+  if( ttl >= 0 ) {
+    NT_TRY(setsockopt(sock, SOL_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)));
+    ttl = ttl ? ttl : 1;
+    NT_TRY(setsockopt(sock, SOL_IP, IP_TTL, &ttl, sizeof(ttl)));
+  }
+}
+
+
 static void do_init(void)
 {
   const char* muxer = cfg_muxer[0];
@@ -580,7 +590,9 @@ static void udp_bind_sock(int us, int ss)
   struct sockaddr_in sa;
   unsigned char uc;
   socklen_t sa_len;
-  int i, rc, one = 1;
+  int rc, one = 1;
+
+  set_ttl(us, cfg_ttl[0]);
 
   sa_len = sizeof(sa);
   NT_TRY(getsockname(ss, (struct sockaddr*) &ss_sa, &sa_len));
@@ -629,12 +641,15 @@ static void udp_bind_sock(int us, int ss)
     /* Solaris requires this to be an unsigned char */
     uc = cfg_mcast_loop[0];
     NT_TRY(setsockopt(us, SOL_IP, IP_MULTICAST_LOOP, &uc, sizeof(uc)));
-    i = cfg_ttl[0];
-    if( cfg_ttl[0] )
-      NT_TRY(setsockopt(us, SOL_IP, IP_TTL, &i, sizeof(i)));
-    NT_TRY(setsockopt(us, SOL_IP, IP_MULTICAST_TTL, &i, sizeof(i)));
+    if( cfg_ttl[0] >= 0 )
+      NT_TRY(setsockopt(us, SOL_IP, IP_MULTICAST_TTL,
+                        &cfg_ttl[0], sizeof(cfg_ttl[0])));
     my_sa.sin_addr.s_addr = inet_addr(cfg_mcast);
     sleep(cfg_mcast_sleep);
+  }
+  else {
+    if( cfg_ttl[0] > 0 )
+      NT_TRY(setsockopt(us, SOL_IP, IP_TTL, &cfg_ttl[0], sizeof(cfg_ttl[0])));
   }
 }
 

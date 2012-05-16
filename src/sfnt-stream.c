@@ -34,7 +34,8 @@ static const char* cfg_raw;
 static float       cfg_percentile = 99;
 static const char* cfg_mcast;
 static const char* cfg_mcast_intf[2];
-static int         cfg_mcast_loop[2];
+static int         cfg_mcast_loop;
+static int         cfg_ttl[2] = { 1, 1 };
 static const char* cfg_bindtodev[2];
 static unsigned    cfg_n_pipe[2];
 static unsigned    cfg_n_unixd[2];
@@ -77,7 +78,8 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1D("percentile",  cfg_percentile,  "percentile"                          ),
   CL1S("mcast",       cfg_mcast,       "set multicast address"               ),
   CL2S("mcastintf",   cfg_mcast_intf,  "set multicast interface"             ),
-  CL2F("mcastloop",   cfg_mcast_loop,  "IP_MULTICAST_LOOP"                   ),
+  CL1F("mcastloop",   cfg_mcast_loop,  "IP_MULTICAST_LOOP"                   ),
+  CL2F("ttl",         cfg_ttl,         "IP_TTL and IP_MULTICAST_TTL"         ),
   CL2S("bindtodev",   cfg_bindtodev,   "SO_BINDTODEVICE"                     ),
   CL2U("n-pipe",      cfg_n_pipe,      "include pipes in fd set"             ),
   CL2U("n-unix-d",    cfg_n_unixd,     "include unix dgram in fd set"        ),
@@ -521,6 +523,16 @@ static void cpu_affinity_set(int core_i)
 }
 
 
+static void set_ttl(int sock, int ttl)
+{
+  if( ttl >= 0 ) {
+    NT_TRY(setsockopt(sock, SOL_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)));
+    ttl = ttl ? ttl : 1;
+    NT_TRY(setsockopt(sock, SOL_IP, IP_TTL, &ttl, sizeof(ttl)));
+  }
+}
+
+
 static void do_init(void)
 {
   const char* muxer = cfg_muxer[0];
@@ -662,7 +674,7 @@ static void client_send_opts(int ss)
   sfnt_sock_put_str(ss, cfg_muxer[1]);
   sfnt_sock_put_str(ss, cfg_mcast);
   sfnt_sock_put_str(ss, cfg_mcast_intf[1]);
-  sfnt_sock_put_int(ss, cfg_mcast_loop[1]);
+  sfnt_sock_put_int(ss, cfg_ttl[1]);
   sfnt_sock_put_str(ss, cfg_bindtodev[1]);
   sfnt_sock_put_int(ss, cfg_n_pipe[1]);
   sfnt_sock_put_int(ss, cfg_n_unixs[1]);
@@ -683,7 +695,7 @@ static void server_recv_opts(int ss)
   cfg_muxer[0] = sfnt_sock_get_str(ss);
   cfg_mcast = sfnt_sock_get_str(ss);
   cfg_mcast_intf[0] = sfnt_sock_get_str(ss);
-  cfg_mcast_loop[0] = sfnt_sock_get_int(ss);
+  cfg_ttl[0] = sfnt_sock_get_int(ss);
   cfg_bindtodev[0] = sfnt_sock_get_str(ss);
   cfg_n_pipe[0] = sfnt_sock_get_int(ss);
   cfg_n_unixs[0] = sfnt_sock_get_int(ss);
@@ -744,6 +756,7 @@ static int do_server2(int ss)
   do_init();
 
   NT_TRY2(sock, socket(PF_INET, SOCK_DGRAM, 0));
+  set_ttl(sock, cfg_ttl[0]);
   if( cfg_bindtodev[0] )
     NT_TRY(sfnt_so_bindtodevice(sock, cfg_bindtodev[0]));
   if( cfg_mcast ) {
@@ -1456,6 +1469,7 @@ static int do_client(int argc, char* argv[])
 static int do_client2(int ss, const char* hostport, int local)
 {
   struct client_tx* ctx;
+  unsigned char uc;
   int one = 1;
 
   client_check_ver(ss);
@@ -1514,15 +1528,18 @@ static int do_client2(int ss, const char* hostport, int local)
   case FDT_UDP: {
     struct sockaddr_in sin;
     socklen_t sin_len = sizeof(sin);
-    int port = sfnt_sock_get_int(ss);
+    int us, port = sfnt_sock_get_int(ss);
     char reply_hostport[80];
-    NT_TRY2(ctx->write_fd, socket(PF_INET, SOCK_DGRAM, 0));
+    NT_TRY2(us, socket(PF_INET, SOCK_DGRAM, 0));
+    set_ttl(us, cfg_ttl[0]);
     if( cfg_bindtodev[0] )
-      NT_TRY(sfnt_so_bindtodevice(ctx->write_fd, cfg_bindtodev[0]));
+      NT_TRY(sfnt_so_bindtodevice(us, cfg_bindtodev[0]));
     if( cfg_mcast_intf[0] )
-      NT_TRY(sfnt_ip_multicast_if(ctx->write_fd, cfg_mcast_intf[0]));
+      NT_TRY(sfnt_ip_multicast_if(us, cfg_mcast_intf[0]));
+    uc = cfg_mcast_loop;
+    NT_TRY(setsockopt(us, SOL_IP, IP_MULTICAST_LOOP, &uc, sizeof(uc)));
     if( cfg_mcast != NULL ) {
-      NT_TRY(sfnt_connect(ctx->write_fd, cfg_mcast, NULL, port));
+      NT_TRY(sfnt_connect(us, cfg_mcast, NULL, port));
     }
     else {
       char host[strlen(hostport) + 1];
@@ -1530,12 +1547,13 @@ static int do_client2(int ss, const char* hostport, int local)
       strcpy(host, hostport);
       if( (p = strchr(host, ':')) != NULL )
         *p = '\0';
-      NT_TRY(sfnt_connect(ctx->write_fd, host, NULL, port));
+      NT_TRY(sfnt_connect(us, host, NULL, port));
     }
-    NT_TRY(getsockname(ctx->write_fd, (struct sockaddr*) &sin, &sin_len));
+    NT_TRY(getsockname(us, (struct sockaddr*) &sin, &sin_len));
     sprintf(reply_hostport, "%s:%d",
             inet_ntoa(sin.sin_addr), ctx->crx->port);
     sfnt_sock_put_str(ss, reply_hostport);
+    ctx->write_fd = us;
     ctx->read_fd = -1;
     break;
   }
