@@ -356,7 +356,12 @@ static ssize_t spin_recv(int fd, void* buf, size_t len, int flags)
 static void set_ttl(int sock, int ttl)
 {
   if( ttl >= 0 ) {
+#if defined(__sun__)
+    unsigned char _ttl = ttl;
+    NT_TRY(setsockopt(sock, SOL_IP, IP_MULTICAST_TTL, &_ttl, sizeof(_ttl)));
+#else
     NT_TRY(setsockopt(sock, SOL_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)));
+#endif
     ttl = ttl ? ttl : 1;
     NT_TRY(setsockopt(sock, SOL_IP, IP_TTL, &ttl, sizeof(ttl)));
   }
