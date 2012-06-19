@@ -220,14 +220,14 @@ int sfnt_sock_set_timeout(int sock, int send_or_recv, int millisec)
 void sfnt_sock_put_int(int fd, int v)
 {
   int32_t v32 = NT_LE32(v);
-  NT_TEST(send(fd, &v32, sizeof(v32), 0) == sizeof(v32));
+  NT_TESTi3(send(fd, &v32, sizeof(v32), 0), ==, sizeof(v32));
 }
 
 
 int sfnt_sock_get_int(int fd)
 {
   int32_t v32;
-  NT_TEST(recv(fd, &v32, sizeof(v32), MSG_WAITALL) == sizeof(v32));
+  NT_TESTi3(recv(fd, &v32, sizeof(v32), MSG_WAITALL), ==, sizeof(v32));
   return NT_LE32(v32);
 }
 
@@ -237,7 +237,7 @@ void  sfnt_sock_put_str(int fd, const char* str)
   if( str != NULL ) {
     int len = strlen(str) + 1;
     sfnt_sock_put_int(fd, len);
-    NT_TEST(send(fd, str, len, 0) == len);
+    NT_TESTi3(send(fd, str, len, 0), ==, len);
   }
   else {
     sfnt_sock_put_int(fd, 0);
@@ -253,7 +253,7 @@ char* sfnt_sock_get_str(int fd)
     return NULL;
   NT_TEST(len > 0);
   str = malloc(len);
-  NT_TEST(recv(fd, str, len, MSG_WAITALL) == len);
-  NT_TEST(str[len - 1] == '\0');
+  NT_TESTi3(recv(fd, str, len, MSG_WAITALL), ==, len);
+  NT_TESTi3(str[len - 1], == ,'\0');
   return str;
 }
