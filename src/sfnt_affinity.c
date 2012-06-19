@@ -27,7 +27,7 @@ int sfnt_cpu_affinity_set(int core_i)
 int sfnt_cpu_affinity_set(int core_i)
 {
   sfnt_err("ERROR: Process/thread affinity not currently supported on this "
-	   "platform\n");
+	   "platform\nPlease rerun with --affinity 'any;any'\n");
   sfnt_fail_test();
   /* not reached */
   return -1;
