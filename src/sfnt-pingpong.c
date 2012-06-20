@@ -433,18 +433,14 @@ static void do_init(void)
 
 static void do_ping(int read_fd, int write_fd, int sz)
 {
-  int i, rc, bufsz = sz;
+  int i, rc;
   for( i = 0; i < cfg_n_pings; ++i ) {
     rc = do_send(write_fd, ppbuf, sz, 0);
     NT_TESTi3(rc, ==, sz);
   }
-#if defined(__sun__)
-  /* SFC bug 30581: On solaris recv with a zero length buffer doesn't block */
-  if( (fd_type == FDT_UDP) && (sz == 0) )
-    bufsz = 1;
-#endif
   for( i = 0; i < cfg_n_pongs; ++i ) {
-    rc = mux_recv(read_fd, ppbuf, bufsz, MSG_WAITALL);
+    /* NB. Solaris doesn't block in UDP recv with 0 length buffer. */
+    rc = mux_recv(read_fd, ppbuf, sz ? sz : 1, MSG_WAITALL);
     NT_TESTi3(rc, ==, sz);
   }
 }
@@ -452,14 +448,10 @@ static void do_ping(int read_fd, int write_fd, int sz)
 
 static void do_pong(int read_fd, int write_fd, int sz)
 {
-  int i, rc, bufsz = sz;
-#if defined(__sun__)
-  /* SFC bug 30581: On solaris recv with a zero length buffer doesn't block */
-  if( (fd_type == FDT_UDP) && (sz == 0) )
-    bufsz = 1;
-#endif
+  int i, rc;
   for( i = 0; i < cfg_n_pings; ++i ) {
-    rc = mux_recv(read_fd, ppbuf, bufsz, MSG_WAITALL);
+    /* NB. Solaris doesn't block in UDP recv with 0 length buffer. */
+    rc = mux_recv(read_fd, ppbuf, sz ? sz : 1, MSG_WAITALL);
     NT_TESTi3(rc, ==, sz);
   }
   for( i = 0; i < cfg_n_pongs; ++i ) {
