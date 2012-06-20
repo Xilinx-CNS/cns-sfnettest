@@ -356,14 +356,10 @@ static ssize_t spin_recv(int fd, void* buf, size_t len, int flags)
 static void set_ttl(int sock, int ttl)
 {
   if( ttl >= 0 ) {
-#if defined(__sun__)
-    unsigned char _ttl = ttl;
-    NT_TRY(setsockopt(sock, SOL_IP, IP_MULTICAST_TTL, &_ttl, sizeof(_ttl)));
-#else
-    NT_TRY(setsockopt(sock, SOL_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)));
-#endif
-    ttl = ttl ? ttl : 1;
-    NT_TRY(setsockopt(sock, SOL_IP, IP_TTL, &ttl, sizeof(ttl)));
+    unsigned char ttl8 = ttl;
+    NT_TRY(setsockopt(sock, SOL_IP, IP_MULTICAST_TTL, &ttl8, sizeof(ttl8)));
+    ttl8 = ttl8 ? ttl8 : 1;
+    NT_TRY(setsockopt(sock, SOL_IP, IP_TTL, &ttl8, sizeof(ttl8)));
   }
 }
 
@@ -656,15 +652,8 @@ static void udp_bind_sock(int us, int ss)
     /* Solaris requires this to be an unsigned char */
     uc = cfg_mcast_loop[0];
     NT_TRY(setsockopt(us, SOL_IP, IP_MULTICAST_LOOP, &uc, sizeof(uc)));
-    if( cfg_ttl[0] >= 0 )
-      NT_TRY(setsockopt(us, SOL_IP, IP_MULTICAST_TTL,
-                        &cfg_ttl[0], sizeof(cfg_ttl[0])));
     my_sa.sin_addr.s_addr = inet_addr(cfg_mcast);
     sleep(cfg_mcast_sleep);
-  }
-  else {
-    if( cfg_ttl[0] > 0 )
-      NT_TRY(setsockopt(us, SOL_IP, IP_TTL, &cfg_ttl[0], sizeof(cfg_ttl[0])));
   }
 }
 
