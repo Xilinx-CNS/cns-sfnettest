@@ -899,26 +899,19 @@ static int try_connect(const char* hostport, int default_port)
   int ss, rc, n_attempts = 0;
   int one = 1;
 
-  NT_TRY2(ss, socket(PF_INET, SOCK_STREAM, 0));
-  NT_TRY(setsockopt(ss, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
-
   if( strchr(hostport, ':') != NULL )
     default_port = -1;
+
   while( 1 ) {
-
-    rc = sfnt_connect(ss, hostport, NULL, default_port);
-    if( rc == 0 )
-      return ss;
-    if( ++n_attempts == max_attempts )
-      return -ECONNREFUSED;
-    if ( errno != ECONNREFUSED )
-      return -errno;
-
-    /* SFC bug 30583 - Solaris workaround for zero length initial recv() */
-    close(ss);
     NT_TRY2(ss, socket(PF_INET, SOCK_STREAM, 0));
     NT_TRY(setsockopt(ss, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
-
+    rc = sfnt_connect(ss, hostport, NULL, default_port);
+    if( rc == 0 || ++n_attempts == max_attempts || errno != ECONNREFUSED )
+      return rc ? rc : ss;
+    /* Something goes bad on Solaris if we try to reconnect with the same
+     * socket, so create a new one each time.
+     */
+    close(ss);
     if( n_attempts == 1 && ! sfnt_quiet )
       sfnt_err("%s: client: waiting for server to start\n", sfnt_app_name);
     usleep(100000);

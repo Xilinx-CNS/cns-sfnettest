@@ -1357,16 +1357,25 @@ static void client_measure_rtt(struct client_tx* ctx, struct stats* stats)
 }
 
 
-static int try_connect(int sock, const char* hostport, int default_port)
+static int try_connect(const char* hostport, int default_port)
 {
   int max_attempts = 100;
-  int rc, n_attempts = 0;
+  int ss, rc, n_attempts = 0;
+  int one = 1;
+
   if( strchr(hostport, ':') != NULL )
     default_port = -1;
+
   while( 1 ) {
-    rc = sfnt_connect(sock, hostport, NULL, default_port);
+    NT_TRY2(ss, socket(PF_INET, SOCK_STREAM, 0));
+    NT_TRY(setsockopt(ss, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
+    rc = sfnt_connect(ss, hostport, NULL, default_port);
     if( rc == 0 || ++n_attempts == max_attempts || errno != ECONNREFUSED )
-      return rc;
+      return rc ? rc : ss;
+    /* Something goes bad on Solaris if we try to reconnect with the same
+     * socket, so create a new one each time.
+     */
+    close(ss);
     if( n_attempts == 1 && ! sfnt_quiet )
       sfnt_err("%s: client: waiting for server to start\n", sfnt_app_name);
     usleep(100000);
@@ -1461,7 +1470,7 @@ static int do_client(int argc, char* argv[])
     }
     NT_TRY2(ss, socket(PF_INET, SOCK_STREAM, 0));
     NT_TRY(setsockopt(ss, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
-    NT_TRY(try_connect(ss, hostport, cfg_port));
+    NT_TRY2(ss, try_connect(hostport, cfg_port));
     return do_client2(ss, hostport, local);
   }
 }
