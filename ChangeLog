@@ -1,0 +1,20 @@
+
+sfnettest-1.5.0
+---------------
+
+- Fix --muxer=select with --spin in sfnt-stream.
+- Set environment variable SFNT_AVOID_FORK=1 to avoid fork() calls.
+- Add hack to allow tools to avoid using MSG_WAITALL.
+- Report VMA related configuration if VMA is detected in LD_PRELOAD.
+- Do more iterations to measure RTT, and do longer warm-up.
+- Print out what percentile is being reported.
+- Only print server LD_PRELOAD when set.
+- Minor improvement to measurement of tick rate.
+- Ensure source checksum is calculated in consistent way.
+- Fix bug when using read(); could read too much data.
+- Fixed buffer over-read bug during warmup.
+- Various fixes for Solaris.
+- Fix --nodelay option; was not set at both ends!
+- Added option --ttl to set IP_TTL and IP_MULTICAST_TTL.
+- Fix minor problem handling command line args.
+- Improve error message when process affinity support is not available.
