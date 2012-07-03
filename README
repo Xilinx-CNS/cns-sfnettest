@@ -8,8 +8,7 @@ SfNetTest
 
  sfnettest is available from www.openonload.org.
 
- This release is only supported on Linux.  We hope to port more of our
- tools into this framework over time.
+ This release supports Linux, Solaris, OSX and FreeBSD.
 
 
 Building
