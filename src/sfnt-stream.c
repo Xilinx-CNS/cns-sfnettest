@@ -1139,7 +1139,7 @@ static void client_stop(struct client_tx* ctx)
    */
   int i;
   client_rx_cmd_set(ctx->crx, CRXC_WAIT);
-  for( i = 0; i < 10; ++i )
+  for( i = 0; i < 20; ++i )
     if( client_sync(ctx, MF_STOP, 100) == 0 )
       break;
   if( i == 10 ) {
