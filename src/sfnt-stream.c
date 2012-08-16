@@ -47,6 +47,7 @@ static const char* cfg_tcpc_serv;
 static const char* cfg_affinity[2];
 static int         cfg_nodelay;
 static unsigned    cfg_rtt_iter = 10000;
+static int         cfg_debug;
 
 #define CL1(a, b, c, d)  SFNT_CLA(a, b, &(c), d)
 #define CL2(a, b, c, d)  SFNT_CLA2(a, b, &(c), d)
@@ -91,6 +92,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL2S("affinity",    cfg_affinity,    "<client-tx>,<client-rx>;<server>"    ),
   CL1F("nodelay",     cfg_nodelay,     "enable TCP_NODELAY"                  ),
   CL1U("rtt-iter",    cfg_rtt_iter,    "iterations for RTT measurement"      ),
+  CL1F("debug",       cfg_debug,       "enable debug logging"                ),
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
@@ -931,7 +933,8 @@ static int client_rx_wait_sync(struct client_rx* crx, uint32_t seq,
 #else
   NT_TRY(clock_gettime(CLOCK_REALTIME, &ts));
 #endif
-  ts.tv_nsec += timeout_millisec * 1000000;
+  ts.tv_sec += timeout_millisec / 1000;
+  ts.tv_nsec += (timeout_millisec % 1000) * 1000000;
   if( ts.tv_nsec > 1000000000 ) {
     ts.tv_nsec -= 1000000000;
     ts.tv_sec += 1;
@@ -939,8 +942,17 @@ static int client_rx_wait_sync(struct client_rx* crx, uint32_t seq,
   PT_CHK(pthread_mutex_lock(&crx->lock));
   while( crx->sync_seq != seq ) {
     rc = pthread_cond_timedwait(&crx->cond, &crx->lock, &ts);
-    if( rc == ETIMEDOUT )
+    if( rc == ETIMEDOUT ) {
+      if( cfg_debug ) {
+        sfnt_err("%s: TIMEOUT timeout=%d.%06d sync_seq=%d seq=%d\n",
+                 __func__, (int) ts.tv_sec, (int) ts.tv_nsec,
+                 crx->sync_seq, seq);
+        NT_TRY(clock_gettime(CLOCK_REALTIME, &ts));
+        sfnt_err("%s: now=%d.%06d\n",
+                 __func__, (int) ts.tv_sec, (int) ts.tv_nsec);
+      }
       break;
+    }
     PT_CHK(rc);
   }
   PT_CHK(pthread_mutex_unlock(&crx->lock));
