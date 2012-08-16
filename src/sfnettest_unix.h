@@ -110,4 +110,11 @@
 #endif
 
 
+#ifdef __APPLE__
+typedef int clockid_t;
+#define CLOCK_REALTIME 0
+extern int clock_gettime(clockid_t clk_id, struct timespec* ts);
+#endif
+
+
 #endif  /* __SFNETTEST_UNIX_H__ */

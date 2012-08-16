@@ -920,19 +920,7 @@ static int client_rx_wait_sync(struct client_rx* crx, uint32_t seq,
   struct timespec ts;
   int rc = 0;
 
-#ifdef __APPLE__
-  clock_serv_t cs;
-  mach_timespec_t mts;
-  kern_return_t kr;
-  NT_TRY3(kr, KERN_SUCCESS,
-	  host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cs));
-  NT_TRY3(kr, KERN_SUCCESS, clock_get_time(cs, &mts));
-  NT_TRY3(kr, KERN_SUCCESS, mach_port_deallocate(mach_task_self(), cs));
-  ts.tv_sec = mts.tv_sec;
-  ts.tv_nsec = mts.tv_nsec;
-#else
   NT_TRY(clock_gettime(CLOCK_REALTIME, &ts));
-#endif
   ts.tv_sec += timeout_millisec / 1000;
   ts.tv_nsec += (timeout_millisec % 1000) * 1000000;
   if( ts.tv_nsec > 1000000000 ) {

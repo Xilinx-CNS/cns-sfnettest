@@ -1,3 +1,5 @@
+include rules_pre.mk
+
 
 APPS		:= sfnt-pingpong sfnt-stream
 DEFAULT		:= $(APPS)
@@ -30,30 +32,15 @@ NETTEST_SRCS	:= sfnt_sysinfo	\
 		sfnt_mux	\
 		sfnt_fd		\
 
+ifdef OS_MACOSX
+NETTEST_SRCS	+= sfnt_macosx
+endif
+
 libsfnettest.a: $(NETTEST_SRCS:%=%.o)
 
 # This file needs -fPIC due to the dynamic symbol magic it uses to detect
 # the presence/version of OpenOnload.
 sfnt_sysinfo.o: CFLAGS += -fPIC
-
-
-# Set per OS flags
-ifeq ($(shell uname -s),Linux)
-OS_LINUX := 1
-MD5SUM := md5sum
-endif
-ifeq ($(shell uname -s),Darwin)
-OS_MACOSX := 1
-MD5SUM := md5
-endif
-ifeq ($(shell uname -s),SunOS)
-OS_SUNOS := 1
-MD5SUM := digest -a md5
-endif
-ifeq ($(shell uname -s),FreeBSD)
-OS_FREEBSD := 1
-MD5SUM := md5
-endif
 
 
 # Set libraries to link against
