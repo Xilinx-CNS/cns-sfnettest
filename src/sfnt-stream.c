@@ -257,6 +257,7 @@ static int            select_max_fd;
 static struct sockaddr*    to_sa;
 static socklen_t           to_sa_len;
 
+/* Timeout for receives in milliseconds. */
 static int                 timeout_ms = 100;
 
 #if NT_HAVE_POLL
@@ -314,7 +315,6 @@ static ssize_t sfn_write(int fd, const void* buf, size_t len, int flags)
 
 static void select_init(void)
 {
-  NT_ASSERT(cfg_spin[0] == 0);  /* spin not yet supported with select */
   FD_ZERO(&select_fdset);
 }
 
@@ -330,17 +330,29 @@ static void select_add(int fd)
 
 static ssize_t select_recv(int fd, void* buf, size_t len, int flags)
 {
+  enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   int i, rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
+  if( cfg_spin[0] )
+    mux_flags |= NT_MUX_SPIN;
   do {
     for( i = 0; i < select_n_fds; ++i )
       FD_SET(select_fds[i], &select_fdset);
     rc = sfnt_select(select_max_fd + 1, &select_fdset, NULL, NULL, &tsc,
-                     timeout_ms, flags);
-    NT_TESTi3(rc, ==, 1);
-    NT_TEST(FD_ISSET(fd, &select_fdset));
-    if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
-      got += rc;
+                     timeout_ms, mux_flags);
+    if( rc == 1 ) {
+      NT_TEST(FD_ISSET(fd, &select_fdset));
+      if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
+        got += rc;
+    }
+    else {
+      NT_TESTi3(rc, <=, 0);
+      if( rc == 0 && got == 0 ) {
+        errno = EAGAIN;
+        rc = -1;
+      }
+      break;
+    }
   } while( all && got < len && rc > 0 );
   return got ? got : rc;
 }
@@ -360,17 +372,20 @@ static void poll_add(int fd)
 
 static ssize_t poll_recv(int fd, void* buf, size_t len, int flags)
 {
+  enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
+  if( cfg_spin[0] )
+    mux_flags |= NT_MUX_SPIN;
   do {
-    rc = sfnt_poll(pfds, pfds_n, timeout_ms, &tsc,
-		   cfg_spin[0] ? NT_MUX_SPIN : 0);
+    rc = sfnt_poll(pfds, pfds_n, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(pfds[0].revents & POLLIN);
       if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
         got += rc;
     }
     else {
+      NT_TESTi3(rc, <=, 0);
       if( rc == 0 && got == 0 ) {
         errno = EAGAIN;
         rc = -1;
@@ -403,17 +418,21 @@ static void epoll_add(int fd)
 
 static ssize_t epoll_recv(int fd, void* buf, size_t len, int flags)
 {
+  enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   struct epoll_event e;
   int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
+  if( cfg_spin[0] )
+    mux_flags |= NT_MUX_SPIN;
   do {
-    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, cfg_spin[0]);
+    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
       if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
         got += rc;
     }
     else {
+      NT_TESTi3(rc, <=, 0);
       if( rc == 0 && got == 0 ) {
         errno = EAGAIN;
         rc = -1;
@@ -427,19 +446,23 @@ static ssize_t epoll_recv(int fd, void* buf, size_t len, int flags)
 
 static ssize_t epoll_mod_recv(int fd, void* buf, size_t len, int flags)
 {
+  enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   struct epoll_event e;
   int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
+  if( cfg_spin[0] )
+    mux_flags |= NT_MUX_SPIN;
   e.events = EPOLLIN;
   NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &e));
   do {
-    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, cfg_spin[0]);
+    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
       if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
         got += rc;
     }
     else {
+      NT_TESTi3(rc, <=, 0);
       if( rc == 0 && got == 0 ) {
         errno = EAGAIN;
         rc = -1;
@@ -455,19 +478,23 @@ static ssize_t epoll_mod_recv(int fd, void* buf, size_t len, int flags)
 
 static ssize_t epoll_adddel_recv(int fd, void* buf, size_t len, int flags)
 {
+  enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   struct epoll_event e;
   int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
+  if( cfg_spin[0] )
+    mux_flags |= NT_MUX_SPIN;
   e.events = EPOLLIN;
   NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &e));
   do {
-    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, cfg_spin[0]);
+    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
       if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
         got += rc;
     }
     else {
+      NT_TESTi3(rc, <=, 0);
       if( rc == 0 && got == 0 ) {
         errno = EAGAIN;
         rc = -1;
@@ -881,7 +908,7 @@ static int do_server3(struct server* server)
       }
     }
     else if( rc == -1 && errno == EAGAIN ) {
-      if (get_recv_size(server))
+      if( get_recv_size(server) )
 	break;
     }
   }
