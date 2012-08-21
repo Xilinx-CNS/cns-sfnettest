@@ -218,6 +218,9 @@ struct sfnt_tsc_params {
  */
 extern int sfnt_tsc_get_params(struct sfnt_tsc_params*);
 
+/* Convert tsc delta to milliseconds. */
+extern int64_t sfnt_tsc_msec(const struct sfnt_tsc_params*, int64_t tsc);
+
 /* Convert tsc delta to microseconds. */
 extern int64_t sfnt_tsc_usec(const struct sfnt_tsc_params*, int64_t tsc);
 
@@ -259,26 +262,29 @@ extern int sfnt_fd_set_blocking(int fd);
 
 
 enum sfnt_mux_flags {
-  NT_MUX_SPIN     = 0x1,
+  NT_MUX_SPIN              = 0x1,
+  NT_MUX_CONTINUE_ON_EINTR = 0x2,
 };
 
-/* Calls select().  Adds option to spin and continues to wait if interrupted
- * by signal.
+/* Calls select().  Adds option to spin and option to continue to wait if
+ * interrupted by signal.  [timeout_ms] behaves like poll().
  */
-extern int sfnt_select(int nfds, fd_set *readfds, fd_set *writefds,
-		fd_set *exceptfds, const struct sfnt_tsc_params* params,
+extern int sfnt_select(int nfds, fd_set* readfds, fd_set* writefds,
+		fd_set* exceptfds, const struct sfnt_tsc_params* params,
 		int timeout_ms, enum sfnt_mux_flags flags);
 
-/* Calls poll().  Adds option to spin and continues to wait if interrupted
- * by signal.
+#if NT_HAVE_POLL
+/* Calls poll().  Adds option to spin and option to continue to wait if
+ * interrupted by signal.
  */
 extern int sfnt_poll(struct pollfd* fds, nfds_t nfds,
 		     int timeout, const struct sfnt_tsc_params* params,
 		     enum sfnt_mux_flags flags);
+#endif
 
 #if NT_HAVE_EPOLL
-/* Calls epoll_wait().  Adds option to spin and continues to wait if
- * interrupted by signal.
+/* Calls epoll_wait().  Adds option to spin and option to continue to wait
+ * if interrupted by signal.
  */
 extern int sfnt_epoll_wait(int epfd, struct epoll_event* events,
 			   int maxevents, int timeout,
