@@ -112,8 +112,10 @@
 
 #if defined(__sun__)
 # ifndef __NFDBITS
-#   define __NFDBITS NFDBITS
-#   define __FDS_BITS(fds) &(fds)->fds_bits[0]
+#  define __NFDBITS NFDBITS
+# endif
+# ifndef __FDS_BITS
+#  define __FDS_BITS(fds) &(fds)->fds_bits[0]
 # endif
 #endif
 
