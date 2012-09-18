@@ -110,6 +110,14 @@
 #endif
 
 
+#if defined(__sun__)
+# ifndef __NFDBITS
+#   define __NFDBITS NFDBITS
+#   define __FDS_BITS(fds) &(fds)->fds_bits[0]
+# endif
+#endif
+
+
 #ifdef __APPLE__
 typedef int clockid_t;
 #define CLOCK_REALTIME 0
