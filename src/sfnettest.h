@@ -345,6 +345,8 @@ extern void sfnt_sock_put_int(int fd, int v);
 extern int  sfnt_sock_get_int(int fd);
 extern void  sfnt_sock_put_str(int fd, const char* str);
 extern char* sfnt_sock_get_str(int fd);
+extern void sfnt_sock_put_sockaddr_in(int fd, const struct sockaddr_in*);
+extern void sfnt_sock_get_sockaddr_in(int fd, struct sockaddr_in*);
 
 
 /**********************************************************************
@@ -355,7 +357,10 @@ extern char* sfnt_sock_get_str(int fd);
 # define NT_LE32(v)     (v)
 # define NT_LE64(v)     (v)
 #else
-# error TODO
+# define NT_LE32(v)     ((((v) & 0xff) << 24) | (((v) & 0xff00) << 8) | \
+                         (((v) >> 8) & 0xff00) | ((unsigned)(v) >> 24))
+# define NT_LE64(v)     ((uint64_t)NT_LE32((v) & 0xffffffff) << 32 |    \
+                         (uint64_t)NT_LE32((v) >> 32))
 #endif
 
 

@@ -709,9 +709,8 @@ static void udp_bind_sock(int us, int ss)
 static void udp_exchange_addrs(int us, int ss)
 {
   /* Tell client our address, and get their's. */
-
-  NT_TEST(send(ss, &my_sa, sizeof(my_sa), 0) == sizeof(my_sa));
-  NT_TEST(recv(ss, &peer_sa, sizeof(peer_sa), MSG_WAITALL) == sizeof(peer_sa));
+  sfnt_sock_put_sockaddr_in(ss, &my_sa);
+  sfnt_sock_get_sockaddr_in(ss, &peer_sa);
 
   if( cfg_connect[0] ) {
     NT_TRY(connect(us, (struct sockaddr*) &peer_sa, sizeof(peer_sa)));

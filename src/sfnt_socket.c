@@ -257,3 +257,30 @@ char* sfnt_sock_get_str(int fd)
   NT_TESTi3(str[len - 1], == ,'\0');
   return str;
 }
+
+
+void sfnt_sock_put_sockaddr_in(int fd, const struct sockaddr_in* sa)
+{
+  /* sin_family is in host byte order so send in little endian,
+     sin_port and sin_addr are already in network order so send as
+     is */
+  int family = NT_LE32(sa->sin_family);
+  NT_TEST(send(fd, &family, sizeof(family), 0) == sizeof(family));
+  NT_TEST(send(fd, &sa->sin_port, sizeof(sa->sin_port), 0) ==
+          sizeof(sa->sin_port));
+  NT_TEST(send(fd, &sa->sin_addr, sizeof(sa->sin_addr), 0) ==
+          sizeof(sa->sin_addr));
+}
+
+
+void sfnt_sock_get_sockaddr_in(int fd, struct sockaddr_in* sa)
+{
+  /* Look at comments in sfnt_sock_put_sockaddr_in */
+  int family;
+  NT_TEST(recv(fd, &family, sizeof(family), MSG_WAITALL) == sizeof(family));
+  sa->sin_family = NT_LE32(family);
+  NT_TEST(recv(fd, &sa->sin_port, sizeof(sa->sin_port), MSG_WAITALL) ==
+          sizeof(sa->sin_port));
+  NT_TEST(recv(fd, &sa->sin_addr, sizeof(sa->sin_addr), MSG_WAITALL) ==
+          sizeof(sa->sin_addr));
+}
