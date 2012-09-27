@@ -820,7 +820,6 @@ static int do_server2(int ss)
 {
   int sl, iter, msg_size;
   int read_fd, write_fd;
-  int one = 1;
 
   server_check_ver(ss);
   server_recv_opts(ss);
@@ -842,9 +841,9 @@ static int do_server2(int ss)
     NT_TRY(getsockname(sl, (struct sockaddr*) &sa, &sa_len));
     sfnt_sock_put_int(ss, ntohs(sa.sin_port));
     NT_TRY2(read_fd, accept(sl, NULL, NULL));
+    write_fd = read_fd;
     if( cfg_nodelay[0] )
       NT_TRY(setsockopt(write_fd, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
-    write_fd = read_fd;
     close(sl);
     sl = -1;
     break;
