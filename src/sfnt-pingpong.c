@@ -168,7 +168,33 @@ static void noop_add(int fd)
 
 /**********************************************************************/
 
-#define rfn_recv  recv
+
+#ifdef __sun__
+#define rfn_recv  solaris_recv
+void alarm_handler()
+{
+  return;
+}
+
+
+ssize_t solaris_recv(int s, void *buf, size_t len, int flags)
+{
+  int rc = 0;
+
+  signal(SIGALRM, alarm_handler);
+  if(cfg_timeout) alarm(cfg_timeout);
+
+  rc = recv(s, buf, len, flags);
+  if(rc == -1 && errno == EINTR) {
+    errno = ETIMEDOUT;
+  }
+
+  alarm(0);
+  return rc;
+}
+#else
+#define rfn_recv recv
+#endif
 
 
 static ssize_t sfn_sendto(int fd, const void* buf, size_t len, int flags)
@@ -724,6 +750,13 @@ static void udp_exchange_addrs(int us, int ss)
 }
 
 
+#if defined(__sun__)
+static void set_sock_timeouts(int sock)
+{
+  /* we use SIGALRM on Solaris. See solaris_recv() */
+  return;
+}
+#else
 static void set_sock_timeouts(int sock)
 {
   if( cfg_timeout ) {
@@ -734,6 +767,7 @@ static void set_sock_timeouts(int sock)
     NT_TRY(setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)));
   }
 }
+#endif
 
 
 static int do_server2(int ss);
