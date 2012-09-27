@@ -47,6 +47,7 @@ static const char* cfg_affinity[2];
 static int         cfg_n_pings = 1;
 static int         cfg_n_pongs = 1;
 static int         cfg_nodelay[2];
+static int         cfg_quickack;
 
 #define CL1(a, b, c, d)  SFNT_CLA(a, b, &(c), d)
 #define CL2(a, b, c, d)  SFNT_CLA2(a, b, &(c), d)
@@ -95,6 +96,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1U("n-pings",     cfg_n_pings,     "number of ping messages"             ),
   CL1U("n-pongs",     cfg_n_pongs,     "number of pong messages"             ),
   CL2F("nodelay",     cfg_nodelay,     "enable TCP_NODELAY"                  ),
+  CL1F("quickack",    cfg_quickack,    "enable TCP_QUICKACK"                 ),
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
@@ -515,26 +517,44 @@ static void do_init(void)
 
 static void do_ping(int read_fd, int write_fd, int sz)
 {
-  int i, rc;
+  int i, rc, one = 1;
   for( i = 0; i < cfg_n_pings; ++i ) {
     rc = do_send(write_fd, ppbuf, sz, 0);
     NT_TESTi3(rc, ==, sz);
   }
-  for( i = 0; i < cfg_n_pongs; ++i ) {
-    /* NB. Solaris doesn't block in UDP recv with 0 length buffer. */
-    rc = mux_recv(read_fd, ppbuf, sz ? sz : 1, MSG_WAITALL);
-    NT_TESTi3(rc, ==, sz);
+  if( cfg_quickack && (fd_type == FDT_TCP) ) {
+    for( i = 0; i < cfg_n_pongs; ++i ) {
+      /* NB. Solaris doesn't block in UDP recv with 0 length buffer. */
+      rc = mux_recv(read_fd, ppbuf, sz ? sz : 1, MSG_WAITALL);
+      NT_TESTi3(rc, ==, sz);
+      NT_TRY(setsockopt(read_fd, SOL_TCP, TCP_QUICKACK, &one, sizeof(one)));
+    }
+  }
+  else {
+    for( i = 0; i < cfg_n_pongs; ++i ) {
+      rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
+      NT_TESTi3(rc, ==, sz);
+    }
   }
 }
 
 
 static void do_pong(int read_fd, int write_fd, int sz)
 {
-  int i, rc;
-  for( i = 0; i < cfg_n_pings; ++i ) {
-    /* NB. Solaris doesn't block in UDP recv with 0 length buffer. */
-    rc = mux_recv(read_fd, ppbuf, sz ? sz : 1, MSG_WAITALL);
-    NT_TESTi3(rc, ==, sz);
+  int i, rc, one = 1;
+  if( cfg_quickack && (fd_type == FDT_TCP) ) {
+    for( i = 0; i < cfg_n_pings; ++i ) {
+      rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
+      NT_TESTi3(rc, ==, sz);
+      NT_TRY(setsockopt(read_fd, SOL_TCP, TCP_QUICKACK, &one, sizeof(one)));
+    }
+  }
+  else {
+    for( i = 0; i < cfg_n_pings; ++i ) {
+      /* NB. Solaris doesn't block in UDP recv with 0 length buffer. */
+      rc = mux_recv(read_fd, ppbuf, sz ? sz : 1, MSG_WAITALL);
+      NT_TESTi3(rc, ==, sz);
+    }
   }
   for( i = 0; i < cfg_n_pongs; ++i ) {
     rc = do_send(write_fd, ppbuf, sz, 0);
@@ -641,6 +661,7 @@ static void client_send_opts(int ss)
   sfnt_sock_put_int(ss, cfg_n_pings);
   sfnt_sock_put_int(ss, cfg_n_pongs);
   sfnt_sock_put_int(ss, cfg_nodelay[1]);
+  sfnt_sock_put_int(ss, cfg_quickack);
 }
 
 
@@ -666,6 +687,7 @@ static void server_recv_opts(int ss)
   cfg_n_pings = sfnt_sock_get_int(ss);
   cfg_n_pongs = sfnt_sock_get_int(ss);
   cfg_nodelay[0] = sfnt_sock_get_int(ss);
+  cfg_quickack = sfnt_sock_get_int(ss);
 }
 
 
@@ -812,6 +834,7 @@ static int do_server2(int ss)
   case FDT_TCP: {
     struct sockaddr_in sa;
     socklen_t sa_len = sizeof(sa);
+    int one = 1;
     NT_TRY2(sl, socket(PF_INET, SOCK_STREAM, 0));
     if( cfg_bindtodev[0] )
       NT_TRY(sfnt_so_bindtodevice(sl, cfg_bindtodev[0]));
@@ -820,7 +843,7 @@ static int do_server2(int ss)
     sfnt_sock_put_int(ss, ntohs(sa.sin_port));
     NT_TRY2(read_fd, accept(sl, NULL, NULL));
     if( cfg_nodelay[0] )
-      NT_TRY(setsockopt(read_fd, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
+      NT_TRY(setsockopt(write_fd, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
     write_fd = read_fd;
     close(sl);
     sl = -1;
