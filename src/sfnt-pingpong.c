@@ -442,8 +442,9 @@ static void set_ttl(int sock, int ttl)
   if( ttl >= 0 ) {
     unsigned char ttl8 = ttl;
     NT_TRY(setsockopt(sock, SOL_IP, IP_MULTICAST_TTL, &ttl8, sizeof(ttl8)));
-    ttl8 = ttl8 ? ttl8 : 1;
-    NT_TRY(setsockopt(sock, SOL_IP, IP_TTL, &ttl8, sizeof(ttl8)));
+    ttl = ttl ? ttl : 1;
+    /* On solaris IP_TTL is required to be an int */
+    NT_TRY(setsockopt(sock, SOL_IP, IP_TTL, &ttl, sizeof(ttl)));
   }
 }
 
