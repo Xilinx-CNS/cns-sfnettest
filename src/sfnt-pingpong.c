@@ -96,7 +96,6 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1U("n-pings",     cfg_n_pings,     "number of ping messages"             ),
   CL1U("n-pongs",     cfg_n_pongs,     "number of pong messages"             ),
   CL2F("nodelay",     cfg_nodelay,     "enable TCP_NODELAY"                  ),
-  CL1F("quickack",    cfg_quickack,    "enable TCP_QUICKACK"                 ),
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
@@ -518,44 +517,25 @@ static void do_init(void)
 
 static void do_ping(int read_fd, int write_fd, int sz)
 {
-  int i, rc, one = 1;
+  int i, rc;
   for( i = 0; i < cfg_n_pings; ++i ) {
     rc = do_send(write_fd, ppbuf, sz, 0);
     NT_TESTi3(rc, ==, sz);
   }
-  if( cfg_quickack && (fd_type == FDT_TCP) ) {
-    for( i = 0; i < cfg_n_pongs; ++i ) {
-      /* NB. Solaris doesn't block in UDP recv with 0 length buffer. */
-      rc = mux_recv(read_fd, ppbuf, sz ? sz : 1, MSG_WAITALL);
-      NT_TESTi3(rc, ==, sz);
-      NT_TRY(setsockopt(read_fd, SOL_TCP, TCP_QUICKACK, &one, sizeof(one)));
-    }
-  }
-  else {
-    for( i = 0; i < cfg_n_pongs; ++i ) {
-      rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
-      NT_TESTi3(rc, ==, sz);
-    }
+  for( i = 0; i < cfg_n_pongs; ++i ) {
+    rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
+    NT_TESTi3(rc, ==, sz);
   }
 }
 
 
 static void do_pong(int read_fd, int write_fd, int sz)
 {
-  int i, rc, one = 1;
-  if( cfg_quickack && (fd_type == FDT_TCP) ) {
-    for( i = 0; i < cfg_n_pings; ++i ) {
-      rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
-      NT_TESTi3(rc, ==, sz);
-      NT_TRY(setsockopt(read_fd, SOL_TCP, TCP_QUICKACK, &one, sizeof(one)));
-    }
-  }
-  else {
-    for( i = 0; i < cfg_n_pings; ++i ) {
-      /* NB. Solaris doesn't block in UDP recv with 0 length buffer. */
-      rc = mux_recv(read_fd, ppbuf, sz ? sz : 1, MSG_WAITALL);
-      NT_TESTi3(rc, ==, sz);
-    }
+  int i, rc;
+  for( i = 0; i < cfg_n_pings; ++i ) {
+    /* NB. Solaris doesn't block in UDP recv with 0 length buffer. */
+    rc = mux_recv(read_fd, ppbuf, sz ? sz : 1, MSG_WAITALL);
+    NT_TESTi3(rc, ==, sz);
   }
   for( i = 0; i < cfg_n_pongs; ++i ) {
     rc = do_send(write_fd, ppbuf, sz, 0);
@@ -662,7 +642,6 @@ static void client_send_opts(int ss)
   sfnt_sock_put_int(ss, cfg_n_pings);
   sfnt_sock_put_int(ss, cfg_n_pongs);
   sfnt_sock_put_int(ss, cfg_nodelay[1]);
-  sfnt_sock_put_int(ss, cfg_quickack);
 }
 
 
@@ -688,7 +667,6 @@ static void server_recv_opts(int ss)
   cfg_n_pings = sfnt_sock_get_int(ss);
   cfg_n_pongs = sfnt_sock_get_int(ss);
   cfg_nodelay[0] = sfnt_sock_get_int(ss);
-  cfg_quickack = sfnt_sock_get_int(ss);
 }
 
 
