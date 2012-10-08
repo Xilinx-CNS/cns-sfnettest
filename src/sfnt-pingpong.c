@@ -47,7 +47,6 @@ static const char* cfg_affinity[2];
 static int         cfg_n_pings = 1;
 static int         cfg_n_pongs = 1;
 static int         cfg_nodelay[2];
-static int         cfg_quickack;
 
 #define CL1(a, b, c, d)  SFNT_CLA(a, b, &(c), d)
 #define CL2(a, b, c, d)  SFNT_CLA2(a, b, &(c), d)
