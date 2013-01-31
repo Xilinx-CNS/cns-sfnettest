@@ -936,9 +936,6 @@ static void do_test(int ss, int read_fd, int write_fd,
     if( results_n + n_this_time > cfg_maxiter )
       n_this_time = cfg_maxiter - results_n;
 
-    if (n_this_time <= 0)
-      break;
-
     do_pings(ss, read_fd, write_fd, msg_size,
              n_this_time, results + results_n);
     results_n += n_this_time;
