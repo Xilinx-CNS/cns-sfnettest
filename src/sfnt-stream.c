@@ -1153,7 +1153,7 @@ static void client_stop(struct client_tx* ctx)
    * rx thread to stop so we can gather results.
    */
   int i;
-  const unsigned int max_retries = 20;
+  const unsigned int max_retries = 50;
 
   client_rx_cmd_set(ctx->crx, CRXC_WAIT);
   for( i = 0; i < max_retries; ++i )
