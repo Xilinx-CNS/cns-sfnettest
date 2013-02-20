@@ -60,7 +60,11 @@ SFNT_SRC_CSUM	:= $(shell find . -name '*.[ch]' | LC_ALL=C sort | \
                              xargs cat | $(MD5SUM) | sed 's/ .*//')
 sinclude version.mk
 ifeq ($(SFNT_VERSION),)
-SFNT_VERSION	:= $(shell hg id --id 2>/dev/null || echo no-version)
+
+SFNT_VERSION	:= $(shell hg id --id 2>/dev/null || \
+  ( test -f ../.hg_archival.txt && \
+    awk -n '/node:/{print $$2}' ../.hg_archival.txt ) || \
+  echo no-version)
 else
 ifneq ($(SFNT_RELEASE_CSUM),$(SFNT_SRC_CSUM))
 SFNT_VERSION	:= $(SFNT_VERSION)-modified
