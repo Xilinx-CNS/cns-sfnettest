@@ -1157,7 +1157,7 @@ static void client_stop(struct client_tx* ctx)
 
   client_rx_cmd_set(ctx->crx, CRXC_WAIT);
   for( i = 0; i < max_retries; ++i )
-    if( client_sync(ctx, MF_STOP, 100) == 0 )
+    if( client_sync(ctx, MF_STOP, 1000) == 0 )
       break;
   if( i == max_retries ) {
     sfnt_err("ERROR: Sync messages at end of test lost\n");
