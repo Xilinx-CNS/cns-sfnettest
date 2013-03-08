@@ -879,22 +879,23 @@ static int do_server3(struct server* server)
     rc = mux_recv(server->read_fd, msg, server->recv_size, flags);
 
     if( rc > 0 ) {
+      uint32_t seq = NT_LE32(msg->seq);
       client = &server->clients[0];
       if( ! (msg->flags & MF_RESET) ) {
-        if( msg->seq == client->seq_expected ) {
+        if( seq == client->seq_expected ) {
           ++client->seq_expected;
         }
-        else if( sfnt_int32_lt(msg->seq, client->seq_expected) ) {
+        else if( sfnt_int32_lt(seq, client->seq_expected) ) {
           ++client->gap_stats.n_ooo;
         }
         else {
-          client->gap_stats.n_msgs_dropped += msg->seq - client->seq_expected;
-          client->seq_expected = msg->seq + 1;
+          client->gap_stats.n_msgs_dropped += seq - client->seq_expected;
+          client->seq_expected = seq + 1;
           ++client->gap_stats.n_gaps;
         }
       }
       else {
-        client->seq_expected = msg->seq + 1;
+        client->seq_expected = seq + 1;
         memset(&client->gap_stats, 0, sizeof(client->gap_stats));
       }
       if( msg->reply_seq != client->reply_seq ) {
