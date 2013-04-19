@@ -239,6 +239,10 @@ extern int64_t sfnt_usec_tsc(const struct sfnt_tsc_params* params,
 extern int64_t sfnt_nsec_tsc(const struct sfnt_tsc_params* params,
 			     int64_t nsecs);
 
+/* Spin for usecs */
+extern void sfnt_tsc_usleep(const struct sfnt_tsc_params* params, 
+                            int64_t usecs);
+
 /**********************************************************************
  * Statistics.
  */

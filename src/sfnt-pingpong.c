@@ -47,6 +47,8 @@ static const char* cfg_affinity[2];
 static int         cfg_n_pings = 1;
 static int         cfg_n_pongs = 1;
 static int         cfg_nodelay[2];
+static unsigned    cfg_sleep_gap = 0;
+static unsigned    cfg_spin_gap = 0;
 
 #define CL1(a, b, c, d)  SFNT_CLA(a, b, &(c), d)
 #define CL2(a, b, c, d)  SFNT_CLA2(a, b, &(c), d)
@@ -95,6 +97,8 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1U("n-pings",     cfg_n_pings,     "number of ping messages"             ),
   CL1U("n-pongs",     cfg_n_pongs,     "number of pong messages"             ),
   CL2F("nodelay",     cfg_nodelay,     "enable TCP_NODELAY"                  ),
+  CL1U("sleep-gap",   cfg_sleep_gap,   "additional gap in microseconds to sleep between iterations"),
+  CL1U("spin-gap",    cfg_spin_gap,    "additional gap in microseconds to spin between iterations"),
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
@@ -887,6 +891,10 @@ static void do_pings(int ss, int read_fd, int write_fd, int msg_size,
     results[i] = (int) sfnt_tsc_nsec(&tsc, stop - start - tsc.tsc_cost);
     if( ! cfg_rtt )
       results[i] /= 2;
+    if( cfg_sleep_gap )
+      usleep(cfg_sleep_gap);
+    if( cfg_spin_gap ) 
+      sfnt_tsc_usleep(&tsc, cfg_spin_gap);
   }
 }
 

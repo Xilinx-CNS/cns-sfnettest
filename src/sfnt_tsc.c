@@ -103,3 +103,14 @@ int64_t sfnt_nsec_tsc(const struct sfnt_tsc_params* params, int64_t nsecs)
 {
   return params->hz * nsecs / 1000000000;
 }
+
+
+void sfnt_tsc_usleep(const struct sfnt_tsc_params* params, int64_t usecs)
+{
+  uint64_t start, stop, spin_stop;
+  spin_stop = sfnt_usec_tsc(params, usecs);
+  sfnt_tsc(&start);
+  do {
+    sfnt_tsc(&stop);
+  } while( stop - start < spin_stop );
+}
