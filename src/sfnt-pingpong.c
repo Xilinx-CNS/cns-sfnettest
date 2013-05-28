@@ -42,7 +42,7 @@ static unsigned    cfg_n_tcpc[2];
 static unsigned    cfg_n_tcpl[2];
 static const char* cfg_tcpc_serv;
 static unsigned    cfg_mcast_sleep = 2;
-static unsigned    cfg_timeout;
+static unsigned    cfg_timeout[2];
 static const char* cfg_affinity[2];
 static int         cfg_n_pings = 1;
 static int         cfg_n_pongs = 1;
@@ -92,7 +92,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL2U("n-tcpc",      cfg_n_tcpc,      "include TCP socks in fd set"         ),
   CL2U("n-tcpl",      cfg_n_tcpl,      "include TCP listeners in fds"        ),
   CL1S("tcpc-serv",   cfg_tcpc_serv,   "host:port for tcp conns"             ),
-  CL1U("timeout",     cfg_timeout,     "socket SND?RECV timeout"             ),
+  CL2U("timeout",     cfg_timeout,     "socket SND?RECV timeout"             ),
   CL2S("affinity",    cfg_affinity,    "<client-core>;<server-core>"         ),
   CL1U("n-pings",     cfg_n_pings,     "number of ping messages"             ),
   CL1U("n-pongs",     cfg_n_pongs,     "number of pong messages"             ),
@@ -186,7 +186,8 @@ ssize_t solaris_recv(int s, void *buf, size_t len, int flags)
   int rc = 0;
 
   signal(SIGALRM, alarm_handler);
-  if(cfg_timeout) alarm(cfg_timeout);
+  if( cfg_timeout[0] )
+    alarm(cfg_timeout[0]);
 
   rc = recv(s, buf, len, flags);
   if(rc == -1 && errno == EINTR) {
@@ -641,6 +642,7 @@ static void client_send_opts(int ss)
   sfnt_sock_put_int(ss, cfg_n_udp[1]);
   sfnt_sock_put_int(ss, cfg_n_tcpc[1]);
   sfnt_sock_put_int(ss, cfg_n_tcpl[1]);
+  sfnt_sock_put_int(ss, cfg_timeout[1]);
   sfnt_sock_put_str(ss, cfg_affinity[1]);
   sfnt_sock_put_int(ss, cfg_n_pings);
   sfnt_sock_put_int(ss, cfg_n_pongs);
@@ -666,6 +668,7 @@ static void server_recv_opts(int ss)
   cfg_n_udp[0] = sfnt_sock_get_int(ss);
   cfg_n_tcpc[0] = sfnt_sock_get_int(ss);
   cfg_n_tcpl[0] = sfnt_sock_get_int(ss);
+  cfg_timeout[0] = sfnt_sock_get_int(ss);
   cfg_affinity[0] = sfnt_sock_get_str(ss);
   cfg_n_pings = sfnt_sock_get_int(ss);
   cfg_n_pongs = sfnt_sock_get_int(ss);
@@ -763,9 +766,9 @@ static void set_sock_timeouts(int sock)
 #else
 static void set_sock_timeouts(int sock)
 {
-  if( cfg_timeout ) {
+  if( cfg_timeout[0] ) {
     struct timeval tv;
-    tv.tv_sec = cfg_timeout;
+    tv.tv_sec = cfg_timeout[0];
     tv.tv_usec = 0;
     NT_TRY(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)));
     NT_TRY(setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)));
@@ -1220,7 +1223,7 @@ int main(int argc, char* argv[])
   if( cfg_minms > cfg_maxms )
     cfg_maxms = cfg_minms;
   NT_ASSERT(cfg_maxiter >= cfg_miniter);
-  timeout_ms = cfg_timeout ? cfg_timeout * 1000 : -1;
+  timeout_ms = cfg_timeout[0] ? cfg_timeout[0] * 1000 : -1;
 
 #if defined(__unix__) ||  defined(__APPLE__)
   if( cfg_forkboth ) {
