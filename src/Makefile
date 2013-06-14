@@ -51,6 +51,9 @@ endif
 ifndef OS_MACOSX
 LIBS += -lrt
 endif
+ifdef OS_LINUX
+LIBS += -lonload_ext -ldl
+endif
 sfnt-stream: LIBS += -lpthread
 $(APPS): libsfnettest.a
 

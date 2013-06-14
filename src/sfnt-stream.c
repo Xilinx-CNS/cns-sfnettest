@@ -11,6 +11,7 @@
 \**************************************************************************/
 
 #include "sfnettest.h"
+#include <onload/extensions_zc.h>
 
 /* TODO:
  *  other fd types
@@ -48,6 +49,8 @@ static const char* cfg_affinity[2];
 static int         cfg_nodelay;
 static unsigned    cfg_rtt_iter = 10000;
 static int         cfg_debug;
+static int         cfg_zc[2];
+static int         cfg_kdata_inline[2];
 
 #define CL1(a, b, c, d)  SFNT_CLA(a, b, &(c), d)
 #define CL2(a, b, c, d)  SFNT_CLA2(a, b, &(c), d)
@@ -93,6 +96,8 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1F("nodelay",     cfg_nodelay,     "enable TCP_NODELAY"                  ),
   CL1U("rtt-iter",    cfg_rtt_iter,    "iterations for RTT measurement"      ),
   CL1F("debug",       cfg_debug,       "enable debug logging"                ),
+  CL1F("zerocopy",    cfg_zc,          "enable zero copy for UDP rx"         ),
+  CL1F("kdata-inline",cfg_zc,          "when using zero copy, receive kernel data inline"),
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
@@ -240,9 +245,12 @@ enum fd_type {
 
 
 #define MAX_FDS            1024
+#define BUF_SZ             64 
+#define MAX_BUFS_PER_PKT   40
 
 static struct sfnt_tsc_params tsc;
 static char           ppbuf[64 * 1024];
+static char           msg_buf[64  * 1024];
 
 static int            client_rx_core_i;
 
@@ -275,10 +283,59 @@ static ssize_t (*do_send)(int, const void*, size_t, int);
 static ssize_t (*mux_recv)(int, void*, size_t, int);
 static void (*mux_add)(int fd);
 
+static struct msghdr msg1;
+static struct iovec iov;
+struct iovec send_iov[BUF_SZ];
+onload_zc_handle send_buf[BUF_SZ];
+int send_iov_i = 0;
+int send_buf_i = 0;
+int next_msg_iov = 0;
+
+static int recv_via_kernel = 0;
+
 
 static void noop_add(int fd)
 {
 }
+
+/**********************************************************************/
+
+static void handle_msg(void* buf, void* iov_base, int len)
+{
+  send_iov[send_iov_i].iov_base = iov_base;
+  send_iov[send_iov_i].iov_len = len;
+  ++send_iov_i;
+}
+
+
+static enum onload_zc_callback_rc
+zc_recv_callback(struct onload_zc_recv_args *args, int flag)
+{
+  int i,len;
+  /* If we hit this assert then we have received a datagram which
+   * requires more than MAX_BUFS_PER_PKT.  It is safe to increase
+   * the value of MAX_BUFS_PER_PKT if this is needed.
+   */     
+  assert(args->msg.msghdr.msg_iovlen < (BUF_SZ - send_iov_i));
+
+  if(args->msg.msghdr.msg_iovlen == 1){
+    len = args->msg.iov[0].iov_len;
+    handle_msg(args->msg.iov[0].buf, args->msg.iov[0].iov_base, args->msg.iov[0].iov_len);
+  } 
+  else {
+    len = 0;
+    for( i = 0; i < args->msg.msghdr.msg_iovlen; ++i ) {
+      len += args->msg.iov[i].iov_len;
+      handle_msg(args->msg.iov[i].buf, args->msg.iov[i].iov_base, args->msg.iov[i].iov_len);
+    }
+  }
+
+  /* Only need to store and release the first buffer handle for each datagram */
+  send_buf[send_buf_i] = args->msg.iov[0].buf;
+  ++send_buf_i;
+
+  return ONLOAD_ZC_TERMINATE | ONLOAD_ZC_KEEP;
+} 
 
 /**********************************************************************/
 
@@ -542,6 +599,61 @@ static ssize_t spin_recv(int fd, void* buf, size_t len, int flags)
 
 /**********************************************************************/
 
+static ssize_t do_recv_zc(int fd, void* buf, size_t len, int flags)
+{
+  struct onload_zc_recv_args zc_args;
+  int rc, j,k;
+
+  /* TODO this initialisation could all be done in advance to improve
+   * latency slightly
+   */
+  zc_args.cb = &zc_recv_callback;
+  zc_args.user_ptr = &zc_args;
+  zc_args.flags = 0;
+  zc_args.msg.msghdr.msg_control = NULL;
+  zc_args.msg.msghdr.msg_controllen = 0;
+  zc_args.msg.msghdr.msg_name = NULL;
+  zc_args.msg.msghdr.msg_namelen = 0;
+
+
+  if( cfg_kdata_inline[0] )
+    zc_args.flags = ONLOAD_MSG_RECV_OS_INLINE;
+  else
+    zc_args.flags = 0;
+
+  if( flags & MSG_DONTWAIT )
+    zc_args.flags |= ONLOAD_MSG_DONTWAIT;
+
+  next_msg_iov = send_iov_i;
+  k = onload_zc_recv(fd, &zc_args);
+  if( k == -ENOTEMPTY ) {
+    recv_via_kernel = 1;
+    if( ( rc = onload_recvmsg_kernel(fd, &msg1, 0) ) < 0 )
+      printf("onload_recvmsg_kernel failed \n ");
+    //errno = -rc;  
+    return rc;
+  }
+  else if( k == 0 ) {
+    if( zc_args.msg.msghdr.msg_iovlen==1 ) {
+      rc = zc_args.msg.iov[0].iov_len;
+    }
+    else{
+      rc = 0;
+      for( j = 0; j < zc_args.msg.msghdr.msg_iovlen; ++j )
+        rc += zc_args.msg.iov[j].iov_len;
+    }
+  }
+  else {
+    if( k != -EAGAIN )
+      printf("onload_zc_recv error %d\n", k);
+    errno = -k;
+    rc = -1;
+  }
+  return rc;
+}
+
+/**********************************************************************/
+
 static void cpu_affinity_set(int core_i)
 {
   if( sfnt_cpu_affinity_set(core_i) != 0 ) {
@@ -569,12 +681,21 @@ static void do_init(void)
 
   NT_TRY(sfnt_tsc_get_params(&tsc));
 
+  if( cfg_zc[0] && (fd_type != FDT_UDP) )
+    sfnt_fail_usage("ERROR: zerocopy support only available for UDP");
+
   if( fd_type == FDT_UDP && ! cfg_connect[0] ) {
-    do_recv = rfn_recv;
+    if( cfg_zc[0] )
+      do_recv = do_recv_zc;
+    else
+      do_recv = rfn_recv;
     do_send = sfn_sendto;
   }
   else if( fd_type & FDTF_SOCKET ) {
-    do_recv = rfn_recv;
+    if( cfg_zc[0] )
+      do_recv = do_recv_zc;
+    else
+      do_recv = rfn_recv;
     do_send = sfn_send;
   }
   else {
@@ -714,6 +835,8 @@ static void client_send_opts(int ss)
   sfnt_sock_put_int(ss, cfg_n_tcpl[1]);
   sfnt_sock_put_str(ss, cfg_affinity[1]);
   sfnt_sock_put_int(ss, cfg_nodelay);
+  sfnt_sock_put_int(ss, cfg_zc[1]);
+  sfnt_sock_put_int(ss, cfg_kdata_inline[1]);
 }
 
 
@@ -735,6 +858,8 @@ static void server_recv_opts(int ss)
   cfg_n_tcpl[0] = sfnt_sock_get_int(ss);
   cfg_affinity[0] = sfnt_sock_get_str(ss);
   cfg_nodelay = sfnt_sock_get_int(ss);
+  cfg_zc[0] = sfnt_sock_get_int(ss);
+  cfg_kdata_inline[0] = sfnt_sock_get_int(ss);
 }
 
 
@@ -870,6 +995,15 @@ static int do_server3(struct server* server)
   int flags = 0;
   int rc;
 
+  msg1.msg_name = NULL;
+  msg1.msg_namelen = 0;
+  msg1.msg_iov = &iov;
+  msg1.msg_iovlen = 1;
+  msg1.msg_control = 0;
+  msg1.msg_controllen = 0;
+  msg1.msg_iov->iov_base = msg_buf;
+  msg1.msg_iov->iov_len = server->recv_size;
+
   if( fd_type & FDTF_STREAM )
     flags |= MSG_WAITALL;
 
@@ -880,6 +1014,17 @@ static int do_server3(struct server* server)
 
     if( rc > 0 ) {
       uint32_t seq = NT_LE32(msg->seq);
+      if( cfg_zc[0] ) {
+        if(!recv_via_kernel) { 
+          msg = (struct msg*) send_iov[next_msg_iov].iov_base;
+          reply = (struct msg_reply*) send_iov[next_msg_iov].iov_base;
+        }
+        else {
+          msg = (struct msg*) msg_buf;
+          reply = (struct msg_reply*) msg_buf;
+          recv_via_kernel = 0; 
+        }
+      }
       client = &server->clients[0];
       if( ! (msg->flags & MF_RESET) ) {
         if( seq == client->seq_expected ) {
@@ -908,9 +1053,26 @@ static int do_server3(struct server* server)
         NT_TESTi3(rc, ==, sizeof(*reply));
       }
     }
+    else if( rc == 0 ) {
+      if( cfg_zc[0] && send_iov_i > 0 ) {
+        if( onload_zc_release_buffers(server->read_fd, send_buf, 
+                                      send_buf_i) != 0 )
+          printf("ERROR: Failed to release buffers\n");
+        send_buf_i = 0;
+        send_iov_i = 0;
+      }
+      break;
+    }
     else if( rc == -1 && errno == EAGAIN ) {
       if( get_recv_size(server) )
 	break;
+    }
+    if( cfg_zc[0] && (send_iov_i >= (BUF_SZ - MAX_BUFS_PER_PKT)) ) {
+      if( onload_zc_release_buffers(server->read_fd, send_buf, 
+                                    send_buf_i) != 0 )
+        printf("ERROR: Failed to release buffers\n");
+      send_iov_i = 0;
+      send_buf_i = 0;
     }
   }
 
@@ -983,6 +1145,15 @@ static void client_rx_go(struct client_rx* crx)
   int flags = 0;
   int rc;
 
+  msg1.msg_name = NULL;
+  msg1.msg_namelen = 0;
+  msg1.msg_iov = &iov;
+  msg1.msg_iovlen = 1;
+  msg1.msg_control = 0;
+  msg1.msg_controllen = 0;
+  msg1.msg_iov->iov_base = msg_buf;
+  msg1.msg_iov->iov_len = crx->reply_buf_len;
+
   if( fd_type & FDTF_STREAM )
     flags |= MSG_WAITALL;
 
@@ -992,6 +1163,14 @@ static void client_rx_go(struct client_rx* crx)
   while( 1 ) {
     rc = mux_recv(crx->sock, crx->reply, crx->reply_buf_len, flags);
     sfnt_tsc(&now);
+    if( cfg_zc[0] ) {
+      if(!recv_via_kernel) 
+        crx->reply = (struct msg_reply*) send_iov[next_msg_iov].iov_base;
+      else { 
+        crx->reply =(struct msg_reply*) msg_buf; 
+        recv_via_kernel = 0;
+      } 
+    }
     if( rc >= sizeof(struct msg_reply) ) {
       if( crx->reply->flags & MF_SAVE ) {
         NT_TESTi3(crx->recs_n, <, crx->recs_max);
@@ -1008,13 +1187,30 @@ static void client_rx_go(struct client_rx* crx)
         PT_CHK(pthread_mutex_unlock(&crx->lock));
         PT_CHK(pthread_cond_signal(&crx->cond));
       }
-      if( crx->reply->flags & MF_STOP )
+      if( crx->reply->flags & MF_STOP ) {
+        if( cfg_zc[0] ) {
+          if( onload_zc_release_buffers(crx->sock, send_buf, 
+                                        send_buf_i) != 0 )
+            printf("ERROR: Failed to release buffers\n ");
+          send_iov_i = 0;
+          send_buf_i = 0;
+        }
         break;
+      }
     }
     else {
       sfnt_err("ERROR: short read or error receiving\n");
       sfnt_err("ERROR: rc=%d errno=(%d %s)\n", rc, errno, strerror(errno));
       sfnt_fail_test();
+    }
+    if( cfg_zc[0] && (send_iov_i >= (BUF_SZ - MAX_BUFS_PER_PKT)) ) {
+      if( send_iov_i > BUF_SZ )
+        sfnt_err("ERROR: send_iov_i out of range %d > %d\n", send_iov_i, 
+                 BUF_SZ);
+      if( onload_zc_release_buffers(crx->sock, send_buf, send_buf_i) != 0 )
+        printf("ERROR: Failed to release buffers\n ");
+      send_iov_i = 0;
+      send_buf_i = 0;
     }
   }
 }

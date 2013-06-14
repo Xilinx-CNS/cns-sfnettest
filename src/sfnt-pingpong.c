@@ -11,6 +11,8 @@
 \**************************************************************************/
 
 #include "sfnettest.h"
+#include <onload/extensions.h>
+#include <onload/extensions_zc.h>
 
 
 static int         cfg_port = 2048;
@@ -49,6 +51,7 @@ static int         cfg_n_pongs = 1;
 static int         cfg_nodelay[2];
 static unsigned    cfg_sleep_gap = 0;
 static unsigned    cfg_spin_gap = 0;
+static int         cfg_zc[2];
 
 #define CL1(a, b, c, d)  SFNT_CLA(a, b, &(c), d)
 #define CL2(a, b, c, d)  SFNT_CLA2(a, b, &(c), d)
@@ -99,6 +102,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL2F("nodelay",     cfg_nodelay,     "enable TCP_NODELAY"                  ),
   CL1U("sleep-gap",   cfg_sleep_gap,   "additional gap in microseconds to sleep between iterations"),
   CL1U("spin-gap",    cfg_spin_gap,    "additional gap in microseconds to spin between iterations"),
+  CL2F("zerocopy",    cfg_zc,          "Use Zero Copy API for TCP tx and UDP rx"),
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
@@ -128,11 +132,24 @@ enum fd_type {
   FDT_UNIX_D  = 4 | FDTF_SOCKET | FDTF_LOCAL | 0,
 };
 
+struct user_info {
+  int size;
+  int flags;
+  int zc_rc;
+};
 
 #define MAX_FDS            1024
 
 static struct sfnt_tsc_params tsc;
 static char           ppbuf[64 * 1024];
+static char           msg_buf[64 * 1024];
+
+#define NUM_ZC_BUFFERS 50
+static struct onload_zc_iovec zc_iovec[NUM_ZC_BUFFERS];
+static struct onload_zc_mmsg zc_mmsg;
+static struct msghdr zc_msg;
+static struct iovec zc_iov;
+struct onload_zc_recv_args zc_args;
 
 static enum fd_type   fd_type;
 static int            the_fds[4];  /* used for pipes and unix sockets */
@@ -227,6 +244,161 @@ static ssize_t sfn_write(int fd, const void* buf, size_t len, int flags)
 {
   return write(fd, buf, len);
 }
+
+/**********************************************************************/
+static void handle_msg(void* iov_base, int len)
+{
+}
+
+/**********************************************************************/
+
+static enum onload_zc_callback_rc
+zc_recv_callback(struct onload_zc_recv_args *args, int flag)
+{
+  struct user_info *zc_info = (struct user_info *)args->user_ptr;
+  int i, zc_rc = 0;
+
+  if(args->msg.msghdr.msg_iovlen == 1) {
+    zc_rc += args->msg.iov[0].iov_len;
+    handle_msg(args->msg.iov[0].iov_base, args->msg.iov[0].iov_len);
+  }
+  else {
+    for( i = 0; i < args->msg.msghdr.msg_iovlen; ++i ) {
+      zc_rc += args->msg.iov[i].iov_len;
+      handle_msg(args->msg.iov[i].iov_base, args->msg.iov[i].iov_len);  
+    }
+  }
+
+  if( zc_rc == 0 )
+    return ONLOAD_ZC_TERMINATE;
+
+  zc_info->zc_rc += zc_rc;
+
+  if( (zc_info->flags & MSG_WAITALL) && 
+      (zc_info->zc_rc < zc_info->size) )
+    return ONLOAD_ZC_CONTINUE;
+  else 
+    return ONLOAD_ZC_TERMINATE;
+}
+
+
+/**********************************************************************/
+
+static ssize_t do_recv_zc(int fd, void* buf, size_t len, int flags)
+{
+  struct user_info info;
+  int rc;
+
+  info.size = len;
+  info.flags = flags & MSG_WAITALL;
+  info.zc_rc = 0;
+
+  zc_args.user_ptr = &info;
+  zc_args.flags = 0;
+  if( flags & MSG_DONTWAIT )
+    zc_args.flags |= ONLOAD_MSG_DONTWAIT;
+
+  rc = onload_zc_recv(fd, &zc_args);
+  if( rc == -ENOTEMPTY ) {
+    if( ( rc = onload_recvmsg_kernel(fd, &zc_msg, 0) ) < 0 )
+      printf("onload_recvmsg_kernel failed\n");
+  } 
+  else if( rc == 0 ) {
+    /* zc_rc gets set by callback to indicate bytes received, so we
+     * can return that to make it look like a standard recv call
+     */
+    rc = info.zc_rc;
+  }
+  return rc;
+}
+
+
+static ssize_t do_send_zc(int fd, const void* buf, size_t len, int flags)
+{
+  int bytes_done, rc, i, bufs_needed;
+
+  /* This assumes that iovec has been initialised with zc buffers by
+   * the caller.  It will replenish iovec with buffers that are
+   * consumed before returning.
+   */
+
+  zc_mmsg.fd = fd;
+  zc_mmsg.msg.iov = zc_iovec;
+
+  bytes_done = 0;
+  zc_mmsg.msg.msghdr.msg_iovlen = 0;
+  while( bytes_done < len ) {
+    if( zc_iovec[zc_mmsg.msg.msghdr.msg_iovlen].iov_len > (len - bytes_done) )
+      zc_iovec[zc_mmsg.msg.msghdr.msg_iovlen].iov_len = (len - bytes_done);
+    /* NB. In theory we should copy buf into the iovec, but as ppbuf is
+     * never patterned there seems little point in doing the memcpy
+     */
+    bytes_done += zc_iovec[zc_mmsg.msg.msghdr.msg_iovlen].iov_len;
+    ++zc_mmsg.msg.msghdr.msg_iovlen;
+  }
+  NT_ASSERT(zc_mmsg.msg.msghdr.msg_iovlen < NUM_ZC_BUFFERS);
+
+  rc = onload_zc_send(&zc_mmsg, 1, 0);
+  if( rc != 1 ) {
+    printf("onload_zc_send failed to process msg, %d\n", rc);
+    return -1;
+  }
+  else {
+    if( zc_mmsg.rc < 0 )
+      printf("onload_zc_send message error %d\n", zc_mmsg.rc);
+    else {
+      /* Iterate over the iovecs; any that we used that have been sent
+       * we need to replenish.  Any that we used that haven't been
+       * sent remain with us so we don't need to replenish, but does
+       * indicate an error
+       */
+      i = 0;
+      bytes_done = 0;
+      bufs_needed = 0;
+      while( i < zc_mmsg.msg.msghdr.msg_iovlen ) {
+        if( bytes_done == zc_mmsg.rc ) {
+          printf("onload_zc_send did not send iovec %d\n", i);
+          /* In other buffer allocation schemes we would have to release
+           * these buffers, but seems pointless as we guarantee at the
+           * end of this function to have iovec array full, so do nothing.
+           *
+           *  onload_zc_release_buffers(fd, &zc_iovec[i].buf, 0)
+           */
+        }
+        else {
+          /* Buffer sent (at least partially) successfully, now owned by
+           * Onload, so replenish iovec array
+           */
+          ++bufs_needed;
+          
+          if( zc_mmsg.rc - bytes_done < zc_iovec[i].iov_len ) {
+            printf("onload_zc_send partial send (%d of %d) of zc_iovec %d\n",
+                   zc_mmsg.rc - bytes_done, (int)zc_iovec[i].iov_len, i);
+            bytes_done = zc_mmsg.rc;
+          }
+          else
+            bytes_done += zc_iovec[i].iov_len;
+        }
+        ++i;
+      }
+
+      if( bufs_needed ) {
+        rc = onload_zc_alloc_buffers(fd, zc_iovec, bufs_needed, 
+                                     ONLOAD_ZC_BUFFER_HDR_TCP);
+        NT_ASSERT(rc == 0);
+      }
+    }
+  }
+
+  /* Set a return code that looks similar enough to send().  NB. we're
+   * not setting (and neither does onload_zc_send()) errno 
+   */
+  if( zc_mmsg.rc < 0 )
+    return -1;
+  else
+    return bytes_done;
+}
+
 
 /**********************************************************************/
 
@@ -451,6 +623,22 @@ static void set_ttl(int sock, int ttl)
   }
 }
 
+static void do_zc_init(int write_fd)
+{
+  if( cfg_zc[0] ) {
+    if( (fd_type != FDT_UDP) && (fd_type != FDT_TCP) )
+      sfnt_fail_usage("ERROR: zerocopy support only available for UDP and TCP");
+
+    if( fd_type == FDT_UDP ) {
+      memset(&zc_args, 0, sizeof(zc_args));
+      zc_args.cb = &zc_recv_callback;
+    }
+    if( fd_type == FDT_TCP )
+      NT_TRY(onload_zc_alloc_buffers(write_fd, &zc_iovec[0], NUM_ZC_BUFFERS,
+                                     ONLOAD_ZC_BUFFER_HDR_TCP));
+  }
+}
+
 
 static void do_init(void)
 {
@@ -469,12 +657,21 @@ static void do_init(void)
   NT_TRY(sfnt_tsc_get_params(&tsc));
 
   if( fd_type == FDT_UDP && ! cfg_connect[0] ) {
-    do_recv = rfn_recv;
+    if( cfg_zc[0] )
+      do_recv = do_recv_zc;
+    else
+      do_recv = rfn_recv;
     do_send = sfn_sendto;
   }
   else if( fd_type & FDTF_SOCKET ) {
-    do_recv = rfn_recv;
-    do_send = sfn_send;
+    if( cfg_zc[0] && (fd_type == FDT_TCP) )
+      do_send = do_send_zc;
+    else
+      do_send = sfn_send;
+    if( cfg_zc[0] && (fd_type == FDT_UDP) )
+      do_recv = do_recv_zc;
+    else
+      do_recv = rfn_recv;
   }
   else {
     do_recv = rfn_read;
@@ -522,6 +719,16 @@ static void do_init(void)
 static void do_ping(int read_fd, int write_fd, int sz)
 {
   int i, rc;
+
+  zc_msg.msg_name = NULL;
+  zc_msg.msg_namelen = 0;
+  zc_msg.msg_iov = &zc_iov;
+  zc_msg.msg_iovlen = 1;
+  zc_msg.msg_control = 0;
+  zc_msg.msg_controllen = 0;
+  zc_msg.msg_iov->iov_base = msg_buf;
+  zc_msg.msg_iov->iov_len = sz;
+
   for( i = 0; i < cfg_n_pings; ++i ) {
     rc = do_send(write_fd, ppbuf, sz, 0);
     NT_TESTi3(rc, ==, sz);
@@ -536,6 +743,16 @@ static void do_ping(int read_fd, int write_fd, int sz)
 static void do_pong(int read_fd, int write_fd, int sz)
 {
   int i, rc;
+
+  zc_msg.msg_name = NULL;
+  zc_msg.msg_namelen = 0;
+  zc_msg.msg_iov = &zc_iov;
+  zc_msg.msg_iovlen = 1;
+  zc_msg.msg_control = 0;
+  zc_msg.msg_controllen = 0;
+  zc_msg.msg_iov->iov_base = msg_buf;
+  zc_msg.msg_iov->iov_len = sz;
+
   for( i = 0; i < cfg_n_pings; ++i ) {
     /* NB. Solaris doesn't block in UDP recv with 0 length buffer. */
     rc = mux_recv(read_fd, ppbuf, sz ? sz : 1, MSG_WAITALL);
@@ -647,6 +864,7 @@ static void client_send_opts(int ss)
   sfnt_sock_put_int(ss, cfg_n_pings);
   sfnt_sock_put_int(ss, cfg_n_pongs);
   sfnt_sock_put_int(ss, cfg_nodelay[1]);
+  sfnt_sock_put_int(ss, cfg_zc[1]);
 }
 
 
@@ -673,6 +891,7 @@ static void server_recv_opts(int ss)
   cfg_n_pings = sfnt_sock_get_int(ss);
   cfg_n_pongs = sfnt_sock_get_int(ss);
   cfg_nodelay[0] = sfnt_sock_get_int(ss);
+  cfg_zc[0] = sfnt_sock_get_int(ss);
 }
 
 
@@ -855,6 +1074,7 @@ static int do_server2(int ss)
   if( fd_type & FDTF_SOCKET )
     set_sock_timeouts(read_fd);
   add_fds(read_fd);
+  do_zc_init(write_fd);
 
   while( 1 ) {
     iter = sfnt_sock_get_int(ss);
@@ -1176,6 +1396,8 @@ static int do_client2(int ss, const char* hostport, int local)
   printf("#\n");
   printf("#\tsize\tmean\tmin\tmedian\tmax\t%%ile\tstddev\titer\n");
   fflush(stdout);
+
+  do_zc_init(write_fd);
 
   if( fd_type & FDTF_STREAM ) {
     if( cfg_minmsg == 0 )
