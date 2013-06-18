@@ -52,6 +52,7 @@ static int         cfg_nodelay[2];
 static unsigned    cfg_sleep_gap = 0;
 static unsigned    cfg_spin_gap = 0;
 static int         cfg_zc[2];
+static unsigned    cfg_warm[2];
 
 #define CL1(a, b, c, d)  SFNT_CLA(a, b, &(c), d)
 #define CL2(a, b, c, d)  SFNT_CLA2(a, b, &(c), d)
@@ -103,6 +104,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1U("sleep-gap",   cfg_sleep_gap,   "additional gap in microseconds to sleep between iterations"),
   CL1U("spin-gap",    cfg_spin_gap,    "additional gap in microseconds to spin between iterations"),
   CL2F("zerocopy",    cfg_zc,          "Use Zero Copy API for TCP tx and UDP rx"),
+  CL2U("warm",        cfg_warm,        "Use MSG_WARM in usecs gap (must be < spin-gap"),
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
@@ -610,6 +612,28 @@ static ssize_t spin_recv(int fd, void* buf, size_t len, int flags)
   return got ? got : rc;
 }
 
+
+static ssize_t warm_recv(int fd, void* buf, size_t len, int flags)
+{
+  int rc, got = 0, all = flags & MSG_WAITALL;
+  flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
+  do {
+    rc = do_recv(fd, (char*) buf + got, len - got, flags);
+    if( rc < 0 ) {
+      if( errno != EAGAIN )
+        goto out;
+      NT_TRY(send(fd, buf, 1, ONLOAD_MSG_WARM));
+      /* Set rc to pass the while condition. */
+      rc = 1;
+    }
+    else {
+      got += rc;
+    }
+  } while( all && got < len && rc > 0 );
+ out:
+  return got ? got : rc;
+}
+
 /**********************************************************************/
 
 static void set_ttl(int sock, int ttl)
@@ -685,7 +709,10 @@ static void do_init(void)
   }
 
   if( muxer == NULL || ! strcmp(muxer, "") || ! strcasecmp(muxer, "none") ) {
-    mux_recv = cfg_spin[0] ? spin_recv : do_recv;
+    if( cfg_warm[0] ) 
+      mux_recv = warm_recv;
+    else
+      mux_recv = cfg_spin[0] ? spin_recv : do_recv;
     mux_add = noop_add;
   }
   else if( ! strcasecmp(muxer, "select") ) {
@@ -871,6 +898,7 @@ static void client_send_opts(int ss)
   sfnt_sock_put_int(ss, cfg_n_pongs);
   sfnt_sock_put_int(ss, cfg_nodelay[1]);
   sfnt_sock_put_int(ss, cfg_zc[1]);
+  sfnt_sock_put_int(ss, cfg_warm[1]);
 }
 
 
@@ -898,6 +926,7 @@ static void server_recv_opts(int ss)
   cfg_n_pongs = sfnt_sock_get_int(ss);
   cfg_nodelay[0] = sfnt_sock_get_int(ss);
   cfg_zc[0] = sfnt_sock_get_int(ss);
+  cfg_warm[0] = sfnt_sock_get_int(ss);
 }
 
 
@@ -986,15 +1015,30 @@ static void udp_exchange_addrs(int us, int ss)
 static void set_sock_timeouts(int sock)
 {
   /* we use SIGALRM on Solaris. See solaris_recv() */
+
+  if( cfg_warm[0] ) {
+    fprintf(stderr, "MSG_WARM not supported on Solaris\n");
+    exit(1);
+  }
   return;
 }
 #else
 static void set_sock_timeouts(int sock)
 {
+  struct timeval tv = {0,0};
   if( cfg_timeout[0] ) {
-    struct timeval tv;
     tv.tv_sec = cfg_timeout[0];
     tv.tv_usec = 0;
+  }
+  if( cfg_warm[0] ) {
+    if( cfg_timeout[0] ) {
+      fprintf(stderr, "MSG_WARM not supported with timeout\n");
+      exit(1);
+    }
+    tv.tv_sec = cfg_warm[0] / 1000000;
+    tv.tv_usec = cfg_warm[0] % 1000000;
+  }
+  if( tv.tv_sec || tv.tv_usec ) {
     NT_TRY(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)));
     NT_TRY(setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)));
   }
@@ -1102,7 +1146,9 @@ static void do_pings(int ss, int read_fd, int write_fd, int msg_size,
                      int iter, int* results)
 {
   uint64_t start, stop;
+  unsigned time_cnt = 0;
   int i;
+  char buf[1];
 
   sfnt_sock_put_int(ss, iter + 1); /* +1 as initial ping  below */
   sfnt_sock_put_int(ss, msg_size);
@@ -1122,8 +1168,18 @@ static void do_pings(int ss, int read_fd, int write_fd, int msg_size,
       results[i] /= 2;
     if( cfg_sleep_gap )
       usleep(cfg_sleep_gap);
-    if( cfg_spin_gap ) 
-      sfnt_tsc_usleep(&tsc, cfg_spin_gap);
+    if( cfg_spin_gap ) {
+      if( cfg_warm[0] ) {
+        time_cnt = 0;
+        for(time_cnt = 0; time_cnt < cfg_spin_gap; time_cnt += cfg_warm[0] ) {
+          sfnt_tsc_usleep(&tsc, cfg_warm[0]);
+          NT_TRY(send(write_fd, buf, 1, ONLOAD_MSG_WARM));
+        }
+      }
+      else {
+        sfnt_tsc_usleep(&tsc, cfg_spin_gap);
+      }
+    }
   }
 }
 
@@ -1350,6 +1406,13 @@ static int do_client2(int ss, const char* hostport, int local)
     cfg_mcast = "224.1.2.48";
 
   do_init();
+
+  if( cfg_warm[0] != 0 && cfg_spin_gap == 0 )
+    sfnt_fail_usage("ERROR: --warm must be used with --spin-gap option");
+
+  if( cfg_warm[0] != 0 && cfg_warm[0] >= cfg_spin_gap )
+    sfnt_fail_usage("ERROR: it doesn't make sense for --warm to be larger "
+                    "than or equal to --spin-gap option");
 
   client_send_opts(ss);
   server_ld_preload = sfnt_sock_get_str(ss);
