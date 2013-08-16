@@ -151,7 +151,7 @@ int sfnt_select(int nfds, fd_set* readfds, fd_set* writefds,
 
   if( timeout_ms != 0 && (flags & (NT_MUX_SPIN | NT_MUX_CONTINUE_ON_EINTR)) ) {
     /* Grab a copy in case we need to call select() more than once. */
-    fds_bytes = (nfds + __NFDBITS - 1) / __NFDBITS;
+    fds_bytes = ((nfds + __NFDBITS -1) / __NFDBITS) * (__NFDBITS / 8);
     if( readfds != NULL )
       memcpy(__FDS_BITS(&readfds_save), __FDS_BITS(readfds), fds_bytes);
     if( writefds != NULL )
