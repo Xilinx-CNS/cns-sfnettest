@@ -53,6 +53,7 @@ static unsigned    cfg_sleep_gap = 0;
 static unsigned    cfg_spin_gap = 0;
 static int         cfg_zc[2];
 static unsigned    cfg_warm[2];
+static unsigned    cfg_tmpl_send[2] = {-1, -1};
 
 #define CL1(a, b, c, d)  SFNT_CLA(a, b, &(c), d)
 #define CL2(a, b, c, d)  SFNT_CLA2(a, b, &(c), d)
@@ -104,7 +105,8 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1U("sleep-gap",   cfg_sleep_gap,   "additional gap in microseconds to sleep between iterations"),
   CL1U("spin-gap",    cfg_spin_gap,    "additional gap in microseconds to spin between iterations"),
   CL2F("zerocopy",    cfg_zc,          "Use Zero Copy API for TCP tx and UDP rx"),
-  CL2U("warm",        cfg_warm,        "Use MSG_WARM in usecs gap (must be < spin-gap"),
+  CL2U("warm",        cfg_warm,        "Use MSG_WARM in usecs gap (must be < spin-gap)"),
+  CL2U("template",    cfg_tmpl_send,   "Use templated_sends and update thispercentage of bytes"),
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
@@ -168,6 +170,9 @@ static socklen_t           to_sa_len;
 
 /* Timeout for receives in milliseconds, or -1 if blocking forever. */
 static int                 timeout_ms;
+
+static onload_template_handle tmpl_handle;
+static int                    tmpl_update_size;
 
 #if NT_HAVE_POLL
 static struct pollfd       pfds[MAX_FDS];
@@ -399,6 +404,96 @@ static ssize_t do_send_zc(int fd, const void* buf, size_t len, int flags)
     return -1;
   else
     return bytes_done;
+}
+
+
+/**********************************************************************/
+
+static void do_tmpl_alloc(int fd, const void* buf, size_t len, int flags)
+{
+  int rc;
+  NT_ASSERT(tmpl_update_size >= 0 && tmpl_update_size <= len);
+  NT_ASSERT(cfg_tmpl_send[0] >= 0 && cfg_tmpl_send[0] <= 100);
+
+  struct iovec iovec = {
+    .iov_base = (void*)buf,
+    .iov_len = len,
+  };
+
+  /* onload_msg_template_alloc() can temporarily fail as templates
+   * only become reusable when the previous ones have finished
+   * sending.  As sfnt-pingpong is trying to allocate them off the
+   * fast path, we can spin here.
+   */
+  while( 1 ) {
+    rc = onload_msg_template_alloc(fd, &iovec, 1, &tmpl_handle, 0);
+    if( rc == 0 )
+      return;
+
+    /* This error implies that templated sends for these lengths is
+     * not supported so we just exit normally.
+    */
+    if( rc == -E2BIG ) {
+      fprintf(stderr, "onload_msg_template_alloc for %ld failed with E2BIG\n",
+              len);
+      exit(0);
+    }
+
+    /* Ignore temporary errors */
+    if( rc != -ENOMEM && rc != -EBUSY ) {
+      fprintf(stderr, "onload_msg_template_alloc for %ld failed with %d\n", len,
+              rc);
+      exit(1);
+    }
+  }
+}
+
+
+static void do_tmpl_abort(void)
+{
+#ifndef NDEBUG
+  int rc;
+  NT_ASSERT(cfg_tmpl_send[0] >= 0 && cfg_tmpl_send[0] <= 100);
+  rc =
+#endif
+    onload_msg_template_abort(tmpl_handle);
+  NT_ASSERT(rc == 0);
+}
+
+
+static ssize_t do_send_tmpl(int fd, const void* buf, size_t len, int flags)
+{
+  int rc;
+  NT_ASSERT(tmpl_update_size >= 0 && tmpl_update_size <= len);
+  NT_ASSERT(cfg_tmpl_send[0] >= 0 && cfg_tmpl_send[0] <= 100);
+  NT_ASSERT(flags == 0);
+
+  /* Finish the current send and then allocate a template for the next
+   * msg off the fast path.
+   */
+
+  if( tmpl_update_size == 0 ) {
+    /* Send with no updates */
+    rc = onload_msg_template_update(tmpl_handle, NULL, 0,
+                                    ONLOAD_TEMPLATE_FLAGS_SEND_NOW);
+  }
+  else {
+    /* Send with updates.  Construct the update iovec with the
+     * requested amount of bytes to update.  This will just update
+     * starting from offset 0 and for tmpl_update_size bytes.
+     */
+    struct onload_template_msg_update_iovec otmu = {
+      .otmu_base   = ppbuf,
+      .otmu_len    = tmpl_update_size,
+      .otmu_offset = 0,
+      .otmu_flags  = 0,
+    };
+    rc = onload_msg_template_update(tmpl_handle, &otmu, 1,
+                                    ONLOAD_TEMPLATE_FLAGS_SEND_NOW);
+  }
+  NT_ASSERT(rc == 0);
+  do_tmpl_alloc(fd, buf, len, flags);
+  return len;
 }
 
 
@@ -675,6 +770,12 @@ static void do_init(void)
   const char* muxer = cfg_muxer[0];
   unsigned core_i;
 
+  if( cfg_tmpl_send[0] != -1 && cfg_tmpl_send[0] > 100 ) {
+    sfnt_err("ERROR: Amount of templated send to update(%d) more than 100%%\n",
+             cfg_tmpl_send[0]);
+    sfnt_fail_setup();
+  }
+
   /* Set affinity first to ensure optimal locality. */
   if( strcasecmp(cfg_affinity[0], "any") )
     if( sscanf(cfg_affinity[0], "%u", &core_i) == 1 )
@@ -687,6 +788,10 @@ static void do_init(void)
   NT_TRY(sfnt_tsc_get_params(&tsc));
 
   if( fd_type == FDT_UDP && ! cfg_connect[0] ) {
+    if( cfg_tmpl_send[0] != -1 ) {
+      sfnt_err("ERROR: templated sends not supported for UDP\n");
+      sfnt_fail_setup();
+    }
     if( cfg_zc[0] )
       do_recv = do_recv_zc;
     else
@@ -702,6 +807,13 @@ static void do_init(void)
       do_recv = do_recv_zc;
     else
       do_recv = rfn_recv;
+    if( cfg_tmpl_send[0] != -1 ) {
+      if( fd_type == FDT_UDP ) {
+        sfnt_err("ERROR: templated sends not supported for UDP\n");
+        sfnt_fail_setup();
+      }
+      do_send = do_send_tmpl;
+    }
   }
   else {
     do_recv = rfn_read;
@@ -899,6 +1011,7 @@ static void client_send_opts(int ss)
   sfnt_sock_put_int(ss, cfg_nodelay[1]);
   sfnt_sock_put_int(ss, cfg_zc[1]);
   sfnt_sock_put_int(ss, cfg_warm[1]);
+  sfnt_sock_put_int(ss, cfg_tmpl_send[1]);
 }
 
 
@@ -927,6 +1040,7 @@ static void server_recv_opts(int ss)
   cfg_nodelay[0] = sfnt_sock_get_int(ss);
   cfg_zc[0] = sfnt_sock_get_int(ss);
   cfg_warm[0] = sfnt_sock_get_int(ss);
+  cfg_tmpl_send[0] = sfnt_sock_get_int(ss);
 }
 
 
@@ -1132,8 +1246,14 @@ static int do_server2(int ss)
       break;
     msg_size = sfnt_sock_get_int(ss);
 
+    if( cfg_tmpl_send[0] != -1 ) {
+      tmpl_update_size = msg_size * cfg_tmpl_send[0] / 100;
+      do_tmpl_alloc(read_fd, ppbuf, msg_size, 0);
+    }
     while( iter-- )
       do_pong(read_fd, write_fd, msg_size);
+    if( cfg_tmpl_send[0] != -1 )
+      do_tmpl_abort();
   }
 
   NT_TESTi3(recv(ss, ppbuf, 1, 0), ==, 0);
@@ -1152,6 +1272,10 @@ static void do_pings(int ss, int read_fd, int write_fd, int msg_size,
 
   sfnt_sock_put_int(ss, iter + 1); /* +1 as initial ping  below */
   sfnt_sock_put_int(ss, msg_size);
+  if( cfg_tmpl_send[0] != -1 ) {
+    do_tmpl_alloc(read_fd, ppbuf, msg_size, 0);
+    tmpl_update_size = msg_size * cfg_tmpl_send[0] / 100;
+  }
 
   /* Touch to ensure resident. */
   memset(results, 0, iter * sizeof(results[0]));
@@ -1181,6 +1305,8 @@ static void do_pings(int ss, int read_fd, int write_fd, int msg_size,
       }
     }
   }
+  if( cfg_tmpl_send[0] != -1 )
+    do_tmpl_abort();
 }
 
 
