@@ -55,6 +55,10 @@ static int         cfg_zc[2];
 static unsigned    cfg_warm[2];
 static unsigned    cfg_tmpl_send[2] = {-1, -1};
 
+/* CL1* implies that the cmdline args are the same for both client and
+ * server.  CL2* implies that different options can be specified for
+ * client and server by using ';'.
+ */
 #define CL1(a, b, c, d)  SFNT_CLA(a, b, &(c), d)
 #define CL2(a, b, c, d)  SFNT_CLA2(a, b, &(c), d)
 #define CL1F(a, c, d)    CL1(a, FLAG, c, d)
