@@ -53,7 +53,7 @@ static unsigned    cfg_sleep_gap = 0;
 static unsigned    cfg_spin_gap = 0;
 static int         cfg_zc[2];
 static unsigned    cfg_warm[2];
-static unsigned    cfg_tmpl_send[2] = {-1, -1};
+static int         cfg_tmpl_send[2] = {-1, -1};
 
 /* CL1* implies that the cmdline args are the same for both client and
  * server.  CL2* implies that different options can be specified for
@@ -110,7 +110,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1U("spin-gap",    cfg_spin_gap,    "additional gap in microseconds to spin between iterations"),
   CL2F("zerocopy",    cfg_zc,          "Use Zero Copy API for TCP tx and UDP rx"),
   CL2U("warm",        cfg_warm,        "Use MSG_WARM in usecs gap (must be < spin-gap)"),
-  CL2U("template",    cfg_tmpl_send,   "Use templated_sends and update thispercentage of bytes"),
+  CL2I("template",    cfg_tmpl_send,   "Use templated_sends and update thispercentage of bytes"),
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
