@@ -76,6 +76,15 @@ endif
 CPPFLAGS	+= -DSFNT_VERSION='"$(SFNT_VERSION)"'
 CPPFLAGS	+= -DSFNT_SRC_CSUM='"$(SFNT_SRC_CSUM)"'
 
+ifdef ONLOAD_TREE
+LINK_ONLOAD_EXT	:= -L$(ONLOAD_TREE)/build/gnu_x86_64/lib/onload_ext \
+		-Wl,-rpath,$(ONLOAD_TREE)/build/gnu_x86_64/lib/onload_ext
+sfnt-pingpong.o: CPPFLAGS += -I$(ONLOAD_TREE)/src/include
+sfnt-stream.o:   CPPFLAGS += -I$(ONLOAD_TREE)/src/include
+sfnt-pingpong: LIBS := $(LINK_ONLOAD_EXT) $(LIBS)
+sfnt-stream:   LIBS := $(LINK_ONLOAD_EXT) $(LIBS)
+endif
+
 # Define MSG_WAITALL_HACK to avoid using MSG_WAITALL, which is not
 # supported by at least one kernel-bypass stack.
 ifdef MSG_WAITALL_HACK

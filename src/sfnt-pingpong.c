@@ -445,22 +445,22 @@ static void do_tmpl_alloc(int fd, const void* buf, size_t len, int flags)
 
     /* Ignore temporary errors */
     if( rc != -ENOMEM && rc != -EBUSY ) {
-      fprintf(stderr, "onload_msg_template_alloc for %ld failed with %d\n", len,
-              rc);
+      fprintf(stderr, "onload_msg_template_alloc for %ld failed with %d %s\n",
+              len, rc, strerror(-rc));
       exit(1);
     }
   }
 }
 
 
-static void do_tmpl_abort(void)
+static void do_tmpl_abort(int sock_fd)
 {
 #ifndef NDEBUG
   int rc;
   NT_ASSERT(cfg_tmpl_send[0] >= 0 && cfg_tmpl_send[0] <= 100);
   rc =
 #endif
-    onload_msg_template_abort(tmpl_handle);
+    onload_msg_template_abort(sock_fd, tmpl_handle);
   NT_ASSERT(rc == 0);
 }
 
@@ -478,7 +478,7 @@ static ssize_t do_send_tmpl(int fd, const void* buf, size_t len, int flags)
 
   if( tmpl_update_size == 0 ) {
     /* Send with no updates */
-    rc = onload_msg_template_update(tmpl_handle, NULL, 0,
+    rc = onload_msg_template_update(fd, tmpl_handle, NULL, 0,
                                     ONLOAD_TEMPLATE_FLAGS_SEND_NOW);
   }
   else {
@@ -492,7 +492,7 @@ static ssize_t do_send_tmpl(int fd, const void* buf, size_t len, int flags)
       .otmu_offset = 0,
       .otmu_flags  = 0,
     };
-    rc = onload_msg_template_update(tmpl_handle, &otmu, 1,
+    rc = onload_msg_template_update(fd, tmpl_handle, &otmu, 1,
                                     ONLOAD_TEMPLATE_FLAGS_SEND_NOW);
   }
   NT_ASSERT(rc == 0);
@@ -1257,7 +1257,7 @@ static int do_server2(int ss)
     while( iter-- )
       do_pong(read_fd, write_fd, msg_size);
     if( cfg_tmpl_send[0] != -1 )
-      do_tmpl_abort();
+      do_tmpl_abort(write_fd);
   }
 
   NT_TESTi3(recv(ss, ppbuf, 1, 0), ==, 0);
@@ -1310,7 +1310,7 @@ static void do_pings(int ss, int read_fd, int write_fd, int msg_size,
     }
   }
   if( cfg_tmpl_send[0] != -1 )
-    do_tmpl_abort();
+    do_tmpl_abort(write_fd);
 }
 
 
