@@ -49,6 +49,7 @@ static int         cfg_n_pongs = 1;
 static int         cfg_nodelay[2];
 static unsigned    cfg_sleep_gap = 0;
 static unsigned    cfg_spin_gap = 0;
+static unsigned    cfg_msg_more[2];
 
 /* CL1* implies that the cmdline args are the same for both client and
  * server.  CL2* implies that different options can be specified for
@@ -103,6 +104,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL2F("nodelay",     cfg_nodelay,     "enable TCP_NODELAY"                  ),
   CL1U("sleep-gap",   cfg_sleep_gap,   "additional gap in microseconds to sleep between iterations"),
   CL1U("spin-gap",    cfg_spin_gap,    "additional gap in microseconds to spin between iterations"),
+  CL2F("more",        cfg_msg_more,    "MSG_MORE for first n-1 pings/pongs"  ),
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
@@ -531,11 +533,13 @@ static void do_init(void)
 
 static void do_ping(int read_fd, int write_fd, int sz)
 {
-  int i, rc;
-  for( i = 0; i < cfg_n_pings; ++i ) {
-    rc = do_send(write_fd, ppbuf, sz, 0);
+  int i, rc, send_flags = cfg_msg_more[0] ? MSG_MORE : 0;
+  for( i = 0; i < cfg_n_pings - 1; ++i ) {
+    rc = do_send(write_fd, ppbuf, sz, send_flags);
     NT_TESTi3(rc, ==, sz);
   }
+  rc = do_send(write_fd, ppbuf, sz, 0);
+  NT_TESTi3(rc, ==, sz);
   for( i = 0; i < cfg_n_pongs; ++i ) {
     rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
     NT_TESTi3(rc, ==, sz);
@@ -545,16 +549,18 @@ static void do_ping(int read_fd, int write_fd, int sz)
 
 static void do_pong(int read_fd, int write_fd, int sz)
 {
-  int i, rc;
+  int i, rc, send_flags = cfg_msg_more[0] ? MSG_MORE : 0;
   for( i = 0; i < cfg_n_pings; ++i ) {
     /* NB. Solaris doesn't block in UDP recv with 0 length buffer. */
     rc = mux_recv(read_fd, ppbuf, sz ? sz : 1, MSG_WAITALL);
     NT_TESTi3(rc, ==, sz);
   }
-  for( i = 0; i < cfg_n_pongs; ++i ) {
-    rc = do_send(write_fd, ppbuf, sz, 0);
+  for( i = 0; i < cfg_n_pongs - 1; ++i ) {
+    rc = do_send(write_fd, ppbuf, sz, send_flags);
     NT_TESTi3(rc, ==, sz);
   }
+  rc = do_send(write_fd, ppbuf, sz, 0);
+  NT_TESTi3(rc, ==, sz);
 }
 
 
@@ -657,6 +663,7 @@ static void client_send_opts(int ss)
   sfnt_sock_put_int(ss, cfg_n_pings);
   sfnt_sock_put_int(ss, cfg_n_pongs);
   sfnt_sock_put_int(ss, cfg_nodelay[1]);
+  sfnt_sock_put_int(ss, cfg_msg_more[1]);
 }
 
 
@@ -683,6 +690,7 @@ static void server_recv_opts(int ss)
   cfg_n_pings = sfnt_sock_get_int(ss);
   cfg_n_pongs = sfnt_sock_get_int(ss);
   cfg_nodelay[0] = sfnt_sock_get_int(ss);
+  cfg_msg_more[0] = sfnt_sock_get_int(ss);
 }
 
 
