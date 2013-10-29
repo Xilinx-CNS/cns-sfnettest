@@ -44,16 +44,16 @@ static const char* cfg_tcpc_serv;
 static unsigned    cfg_mcast_sleep = 2;
 static unsigned    cfg_timeout[2];
 static const char* cfg_affinity[2];
-static int         cfg_n_pings = 1;
+static int         cfg_n_pings[2] = { 1, 1 };
 static int         cfg_n_pongs = 1;
 static int         cfg_nodelay[2];
 static unsigned    cfg_sleep_gap = 0;
 static unsigned    cfg_spin_gap = 0;
 static unsigned    cfg_msg_more[2];
 
-/* CL1* implies that the cmdline args are the same for both client and
- * server.  CL2* implies that different options can be specified for
- * client and server by using ';'.
+/* CL1* args take a single value (either applying to both client and server
+ * or just one end).  CL2* args take either one value (used for both client
+ * and server) or separate values for client and server separated by ';'.
  */
 #define CL1(a, b, c, d)  SFNT_CLA(a, b, &(c), d)
 #define CL2(a, b, c, d)  SFNT_CLA2(a, b, &(c), d)
@@ -99,11 +99,11 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1S("tcpc-serv",   cfg_tcpc_serv,   "host:port for tcp conns"             ),
   CL2U("timeout",     cfg_timeout,     "socket SND?RECV timeout"             ),
   CL2S("affinity",    cfg_affinity,    "<client-core>;<server-core>"         ),
-  CL1U("n-pings",     cfg_n_pings,     "number of ping messages"             ),
+  CL2U("n-pings",     cfg_n_pings,     "number of ping messages"             ),
   CL1U("n-pongs",     cfg_n_pongs,     "number of pong messages"             ),
   CL2F("nodelay",     cfg_nodelay,     "enable TCP_NODELAY"                  ),
-  CL1U("sleep-gap",   cfg_sleep_gap,   "additional gap in microseconds to sleep between iterations"),
-  CL1U("spin-gap",    cfg_spin_gap,    "additional gap in microseconds to spin between iterations"),
+  CL1U("sleep-gap",   cfg_sleep_gap,   "gap in usec to sleep between iter"   ),
+  CL1U("spin-gap",    cfg_spin_gap,    "gap in usec to spin between iter"    ),
   CL2F("more",        cfg_msg_more,    "MSG_MORE for first n-1 pings/pongs"  ),
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
@@ -531,36 +531,46 @@ static void do_init(void)
 }
 
 
+static int recv_size(int sz)
+{
+#ifdef __sun__
+  return sz ? sz : 1;
+#else
+  return sz;
+#endif
+}
+
+
 static void do_ping(int read_fd, int write_fd, int sz)
 {
   int i, rc, send_flags = cfg_msg_more[0] ? MSG_MORE : 0;
-  for( i = 0; i < cfg_n_pings - 1; ++i ) {
+  for( i = 0; i < cfg_n_pings[0] - 1; ++i ) {
     rc = do_send(write_fd, ppbuf, sz, send_flags);
     NT_TESTi3(rc, ==, sz);
   }
   rc = do_send(write_fd, ppbuf, sz, 0);
   NT_TESTi3(rc, ==, sz);
   for( i = 0; i < cfg_n_pongs; ++i ) {
-    rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
+    rc = mux_recv(read_fd, ppbuf, recv_size(sz), MSG_WAITALL);
     NT_TESTi3(rc, ==, sz);
   }
 }
 
 
-static void do_pong(int read_fd, int write_fd, int sz)
+static void do_pong(int read_fd, int write_fd, int recv_sz, int send_sz)
 {
   int i, rc, send_flags = cfg_msg_more[0] ? MSG_MORE : 0;
-  for( i = 0; i < cfg_n_pings; ++i ) {
+  for( i = 0; i < cfg_n_pings[0]; ++i ) {
     /* NB. Solaris doesn't block in UDP recv with 0 length buffer. */
-    rc = mux_recv(read_fd, ppbuf, sz ? sz : 1, MSG_WAITALL);
-    NT_TESTi3(rc, ==, sz);
+    rc = mux_recv(read_fd, ppbuf, recv_size(recv_sz), MSG_WAITALL);
+    NT_TESTi3(rc, ==, recv_sz);
   }
   for( i = 0; i < cfg_n_pongs - 1; ++i ) {
-    rc = do_send(write_fd, ppbuf, sz, send_flags);
-    NT_TESTi3(rc, ==, sz);
+    rc = do_send(write_fd, ppbuf, send_sz, send_flags);
+    NT_TESTi3(rc, ==, send_sz);
   }
-  rc = do_send(write_fd, ppbuf, sz, 0);
-  NT_TESTi3(rc, ==, sz);
+  rc = do_send(write_fd, ppbuf, send_sz, 0);
+  NT_TESTi3(rc, ==, send_sz);
 }
 
 
@@ -660,7 +670,8 @@ static void client_send_opts(int ss)
   sfnt_sock_put_int(ss, cfg_n_tcpl[1]);
   sfnt_sock_put_int(ss, cfg_timeout[1]);
   sfnt_sock_put_str(ss, cfg_affinity[1]);
-  sfnt_sock_put_int(ss, cfg_n_pings);
+  sfnt_sock_put_int(ss, cfg_n_pings[1]);
+  sfnt_sock_put_int(ss, cfg_n_pings[0]);
   sfnt_sock_put_int(ss, cfg_n_pongs);
   sfnt_sock_put_int(ss, cfg_nodelay[1]);
   sfnt_sock_put_int(ss, cfg_msg_more[1]);
@@ -687,7 +698,8 @@ static void server_recv_opts(int ss)
   cfg_n_tcpl[0] = sfnt_sock_get_int(ss);
   cfg_timeout[0] = sfnt_sock_get_int(ss);
   cfg_affinity[0] = sfnt_sock_get_str(ss);
-  cfg_n_pings = sfnt_sock_get_int(ss);
+  cfg_n_pings[0] = sfnt_sock_get_int(ss);
+  cfg_n_pings[1] = sfnt_sock_get_int(ss);
   cfg_n_pongs = sfnt_sock_get_int(ss);
   cfg_nodelay[0] = sfnt_sock_get_int(ss);
   cfg_msg_more[0] = sfnt_sock_get_int(ss);
@@ -821,7 +833,7 @@ static int do_server(void)
 
 static int do_server2(int ss)
 {
-  int sl, iter, msg_size;
+  int sl, iter, send_size, recv_size;
   int read_fd, write_fd;
 
   server_check_ver(ss);
@@ -878,10 +890,11 @@ static int do_server2(int ss)
     iter = sfnt_sock_get_int(ss);
     if( iter == 0 )
       break;
-    msg_size = sfnt_sock_get_int(ss);
+    send_size = sfnt_sock_get_int(ss);
+    recv_size = (uint64_t) send_size * cfg_n_pings[1] / cfg_n_pings[0];
 
     while( iter-- )
-      do_pong(read_fd, write_fd, msg_size);
+      do_pong(read_fd, write_fd, recv_size, send_size);
   }
 
   NT_TESTi3(recv(ss, ppbuf, 1, 0), ==, 0);
