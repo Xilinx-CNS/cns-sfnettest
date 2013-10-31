@@ -8,5 +8,10 @@
 *.user
 *.a
 *.so
+*.sdf
+*.opensdf
+*.suo
 sfnt-pingpong
 sfnt-stream
+
+/(x86/|x64/|)(Debug|Release|ipch)
