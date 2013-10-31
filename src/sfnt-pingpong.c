@@ -1164,10 +1164,11 @@ static int do_client2(int ss, const char* hostport, int local)
   case FDT_TCP: {
     char* host = (char*) alloca(strlen(hostport) + 1);
     char* p;
+    int port;
     strcpy(host, hostport);
     if( (p = strchr(host, ':')) != NULL )
       *p = '\0';
-    int port = sfnt_sock_get_int(ss);
+    port = sfnt_sock_get_int(ss);
     NT_TRY2(read_fd, socket(PF_INET, SOCK_STREAM, 0));
     if( cfg_nodelay[0] )
       NT_TRY(setsockopt(read_fd, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
