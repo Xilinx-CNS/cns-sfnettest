@@ -22,16 +22,16 @@
 #include <errno.h>
 #include <ctype.h>
 
+#ifdef __GNUC__
+# include "sfnettest_gcc.h"
+#endif
+
 #if defined(__unix__) || defined(__APPLE__)
 # include "sfnettest_unix.h"
 #elif defined(_WIN32)
 # include "sfnettest_win32.h"
 #else
 # error "Unknown platform"
-#endif
-
-#ifdef __GNUC__
-# include "sfnettest_gcc.h"
 #endif
 
 
