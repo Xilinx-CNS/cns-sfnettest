@@ -1246,6 +1246,11 @@ int main(int argc, char* argv[])
   pid_t pid = 0;
   int rc = 0;
 
+#ifdef _WIN32
+  WSADATA WinsockInfo;
+  NT_TRY3(rc, 0, WSAStartup(MAKEWORD(2, 2), &WinsockInfo));
+#endif
+
   sfnt_app_getopt("[tcp|udp|pipe|unix_stream|unix_datagram [host[:port]]]",
                 &argc, argv, cfg_opts, N_CFG_OPTS);
   --argc; ++argv;

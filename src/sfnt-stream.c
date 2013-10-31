@@ -1677,6 +1677,11 @@ int main(int argc, char* argv[])
 {
   int rc = 0;
 
+#ifdef _WIN32
+  WSADATA WinsockInfo;
+  NT_TRY3(rc, 0, WSAStartup(MAKEWORD(2, 2), &WinsockInfo));
+#endif
+
   /* fixme: this could be a compile-time check */
   NT_TESTi3(DEFAULT_MSG_SIZE, >=, sizeof(struct msg));
 
