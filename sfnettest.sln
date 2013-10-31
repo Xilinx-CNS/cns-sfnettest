@@ -1,0 +1,64 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 2012
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libsfnettest", "libsfnettest.vcxproj", "{3757585C-2AF1-4651-9FE9-891ADBA0FDD2}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "sfnt-pingpong", "sfnt-pingpong.vcxproj", "{E524F29A-F170-4363-97FF-229063F4F4A5}"
+	ProjectSection(ProjectDependencies) = postProject
+		{3757585C-2AF1-4651-9FE9-891ADBA0FDD2} = {3757585C-2AF1-4651-9FE9-891ADBA0FDD2}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "sfnt-stream", "sfnt-stream.vcxproj", "{23F833D9-1775-471D-90F8-9079D614D348}"
+	ProjectSection(ProjectDependencies) = postProject
+		{3757585C-2AF1-4651-9FE9-891ADBA0FDD2} = {3757585C-2AF1-4651-9FE9-891ADBA0FDD2}
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Debug|x64 = Debug|x64
+		Release|Win32 = Release|Win32
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3757585C-2AF1-4651-9FE9-891ADBA0FDD2}.Debug|Win32.ActiveCfg = Debug|Win32
+		{3757585C-2AF1-4651-9FE9-891ADBA0FDD2}.Debug|Win32.Build.0 = Debug|Win32
+		{3757585C-2AF1-4651-9FE9-891ADBA0FDD2}.Debug|Win32.Deploy.0 = Debug|Win32
+		{3757585C-2AF1-4651-9FE9-891ADBA0FDD2}.Debug|x64.ActiveCfg = Debug|x64
+		{3757585C-2AF1-4651-9FE9-891ADBA0FDD2}.Debug|x64.Build.0 = Debug|x64
+		{3757585C-2AF1-4651-9FE9-891ADBA0FDD2}.Debug|x64.Deploy.0 = Debug|x64
+		{3757585C-2AF1-4651-9FE9-891ADBA0FDD2}.Release|Win32.ActiveCfg = Release|Win32
+		{3757585C-2AF1-4651-9FE9-891ADBA0FDD2}.Release|Win32.Build.0 = Release|Win32
+		{3757585C-2AF1-4651-9FE9-891ADBA0FDD2}.Release|Win32.Deploy.0 = Release|Win32
+		{3757585C-2AF1-4651-9FE9-891ADBA0FDD2}.Release|x64.ActiveCfg = Release|x64
+		{3757585C-2AF1-4651-9FE9-891ADBA0FDD2}.Release|x64.Build.0 = Release|x64
+		{3757585C-2AF1-4651-9FE9-891ADBA0FDD2}.Release|x64.Deploy.0 = Release|x64
+		{E524F29A-F170-4363-97FF-229063F4F4A5}.Debug|Win32.ActiveCfg = Debug|Win32
+		{E524F29A-F170-4363-97FF-229063F4F4A5}.Debug|Win32.Build.0 = Debug|Win32
+		{E524F29A-F170-4363-97FF-229063F4F4A5}.Debug|Win32.Deploy.0 = Debug|Win32
+		{E524F29A-F170-4363-97FF-229063F4F4A5}.Debug|x64.ActiveCfg = Debug|x64
+		{E524F29A-F170-4363-97FF-229063F4F4A5}.Debug|x64.Build.0 = Debug|x64
+		{E524F29A-F170-4363-97FF-229063F4F4A5}.Debug|x64.Deploy.0 = Debug|x64
+		{E524F29A-F170-4363-97FF-229063F4F4A5}.Release|Win32.ActiveCfg = Release|Win32
+		{E524F29A-F170-4363-97FF-229063F4F4A5}.Release|Win32.Build.0 = Release|Win32
+		{E524F29A-F170-4363-97FF-229063F4F4A5}.Release|Win32.Deploy.0 = Release|Win32
+		{E524F29A-F170-4363-97FF-229063F4F4A5}.Release|x64.ActiveCfg = Release|x64
+		{E524F29A-F170-4363-97FF-229063F4F4A5}.Release|x64.Build.0 = Release|x64
+		{E524F29A-F170-4363-97FF-229063F4F4A5}.Release|x64.Deploy.0 = Release|x64
+		{23F833D9-1775-471D-90F8-9079D614D348}.Debug|Win32.ActiveCfg = Debug|Win32
+		{23F833D9-1775-471D-90F8-9079D614D348}.Debug|Win32.Build.0 = Debug|Win32
+		{23F833D9-1775-471D-90F8-9079D614D348}.Debug|Win32.Deploy.0 = Debug|Win32
+		{23F833D9-1775-471D-90F8-9079D614D348}.Debug|x64.ActiveCfg = Debug|x64
+		{23F833D9-1775-471D-90F8-9079D614D348}.Debug|x64.Build.0 = Debug|x64
+		{23F833D9-1775-471D-90F8-9079D614D348}.Debug|x64.Deploy.0 = Debug|x64
+		{23F833D9-1775-471D-90F8-9079D614D348}.Release|Win32.ActiveCfg = Release|Win32
+		{23F833D9-1775-471D-90F8-9079D614D348}.Release|Win32.Build.0 = Release|Win32
+		{23F833D9-1775-471D-90F8-9079D614D348}.Release|Win32.Deploy.0 = Release|Win32
+		{23F833D9-1775-471D-90F8-9079D614D348}.Release|x64.ActiveCfg = Release|x64
+		{23F833D9-1775-471D-90F8-9079D614D348}.Release|x64.Build.0 = Release|x64
+		{23F833D9-1775-471D-90F8-9079D614D348}.Release|x64.Deploy.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
