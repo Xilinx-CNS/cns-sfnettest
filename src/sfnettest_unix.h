@@ -42,6 +42,8 @@
 # include <mach/mach.h>
 #endif
 #include <pthread.h>
+#include <sched.h>
+#include <fcntl.h>
 
 #if defined(__linux__)
 # define NT_SUPPORTS_ONLOAD 1

@@ -12,6 +12,8 @@
 #ifndef __NETTEST_GCC_H__
 #define __NETTEST_GCC_H__
 
+#include <inttypes.h>
+
 
 #ifdef __x86_64__
 static inline void sfnt_tsc(uint64_t* pval) {

@@ -11,7 +11,6 @@
 
 #define _GNU_SOURCE
 #include "sfnettest.h"
-#include <sched.h>
 
 #ifdef __linux__
 int sfnt_cpu_affinity_set(int core_i)

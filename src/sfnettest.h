@@ -17,10 +17,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <inttypes.h>
 #include <assert.h>
 #include <math.h>
 #include <errno.h>
+#include <ctype.h>
 
 #if defined(__unix__) || defined(__APPLE__)
 # include "sfnettest_unix.h"

@@ -10,10 +10,6 @@
 \**************************************************************************/
 
 #include "sfnettest.h"
-#include <sys/ioctl.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <fcntl.h>
 
 
 int sfnt_fd_set_nonblocking(int fd)

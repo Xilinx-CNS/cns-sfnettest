@@ -10,9 +10,6 @@
 \**************************************************************************/
 
 #include "sfnettest.h"
-#ifdef __unix__
-# include <net/if.h>
-#endif
 
 
 int sfnt_getaddrinfo(const char* host, const char* port, int port_i,
