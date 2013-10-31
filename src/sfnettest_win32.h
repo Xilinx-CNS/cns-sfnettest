@@ -12,6 +12,8 @@
 #ifndef __SFNETTEST_WIN32_H__
 #define __SFNETTEST_WIN32_H__
 
+#include <malloc.h>  /* For _alloca() */
+
 #define NT_SUPPORTS_ONLOAD 0
 
 #define NT_HAVE_POLL    0
@@ -35,6 +37,12 @@ static __inline ssize_t __nt_recv(int fd, void* buf, size_t len, int flags)
   return recv(fd, (char*) buf, len, flags);
 }
 #define recv __nt_recv
+
+
+/**********************************************************************
+ * Use _alloca() rather than alloca()
+ */
+#define alloca _alloca
 
 
 #endif  /* __SFNETTEST_WIN32_H__ */

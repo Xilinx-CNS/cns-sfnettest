@@ -1198,7 +1198,7 @@ static double ts_to_dbl(struct client_tx* ctx, uint64_t ts)
 
 static void write_raw_results(struct client_tx* ctx)
 {
-  char fname[strlen(cfg_raw) + 60];
+  char* fname = (char*) alloca(strlen(cfg_raw) + 60);
   FILE* f;
   int i;
 
@@ -1249,8 +1249,8 @@ static void stats_divide(struct stats* s, int divisor)
 static void write_result_line(struct client_tx* ctx)
 {
   struct client_rx* crx = ctx->crx;
-  int send_jit[ctx->crx->recs_n];
-  int lat[ctx->crx->recs_n];
+  int* send_jit = (int*) alloca(ctx->crx->recs_n * sizeof(int));
+  int* lat = (int*) alloca(ctx->crx->recs_n * sizeof(int));
   struct stats l, j;
   int i;
 
@@ -1381,7 +1381,7 @@ static void client_measure_rtt(struct client_tx* ctx, struct stats* stats)
 
   {
     struct client_rx_rec* r;
-    int rtt[crx->recs_n];
+    int* rtt = (int*) alloca(crx->recs_n * sizeof(int));
     for( i = 0; i < crx->recs_n; ++i ) {
       r = &crx->recs[i];
       rtt[i] = sfnt_tsc_nsec(&tsc, r->ts_recv - r->ts_send);
@@ -1558,7 +1558,7 @@ static int do_client2(int ss, const char* hostport, int local)
   switch( fd_type ) {
   case FDT_TCP: {
     int port = sfnt_sock_get_int(ss);
-    char host[strlen(hostport) + 1];
+    char* host = (char*) alloca(strlen(hostport) + 1);
     char* p;
     strcpy(host, hostport);
     if( (p = strchr(host, ':')) != NULL )
@@ -1588,7 +1588,7 @@ static int do_client2(int ss, const char* hostport, int local)
       NT_TRY(sfnt_connect(us, cfg_mcast, NULL, port));
     }
     else {
-      char host[strlen(hostport) + 1];
+      char* host = (char*) alloca(strlen(hostport) + 1);
       char* p;
       strcpy(host, hostport);
       if( (p = strchr(host, ':')) != NULL )

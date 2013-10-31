@@ -950,7 +950,7 @@ static void get_stats(struct stats* s, int* results, int results_n)
 
 static void write_raw_results(int msg_size, int* results, int results_n)
 {
-  char fname[strlen(cfg_raw) + 30];
+  char* fname = (char*) alloca(strlen(cfg_raw) + 30);
   FILE* f;
   int i;
   sprintf(fname, "%s-%d.dat", cfg_raw, msg_size);
@@ -1162,7 +1162,7 @@ static int do_client2(int ss, const char* hostport, int local)
   /* Create and bind/connect test socket. */
   switch( fd_type ) {
   case FDT_TCP: {
-    char host[strlen(hostport) + 1];
+    char* host = (char*) alloca(strlen(hostport) + 1);
     char* p;
     strcpy(host, hostport);
     if( (p = strchr(host, ':')) != NULL )

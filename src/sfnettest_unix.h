@@ -41,6 +41,11 @@
 # include <mach/clock.h>
 # include <mach/mach.h>
 #endif
+#if defined(__FreeBSD__)
+#include <stdlib.h>
+#else
+#include <alloca.h>
+#endif
 #include <pthread.h>
 #include <sched.h>
 #include <fcntl.h>
