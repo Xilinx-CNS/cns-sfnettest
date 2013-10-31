@@ -15,6 +15,9 @@
 #include <inttypes.h>
 
 
+#define NT_PRINTF_LIKE(a, b)  __attribute__((format(printf,a,b)))
+
+
 #ifdef __x86_64__
 static inline void sfnt_tsc(uint64_t* pval) {
   uint64_t low, high;

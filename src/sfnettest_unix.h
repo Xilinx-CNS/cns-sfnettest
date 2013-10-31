@@ -84,9 +84,7 @@
 # error "Please define NT_HAVE_FIONBIO for this platform"
 #endif
 
-#ifdef __GNUC__
-# define NT_PRINTF_LIKE(a, b)  __attribute__((format(printf,a,b)))
-#else
+#ifndef NT_PRINTF_LIKE
 # define NT_PRINTF_LIKE(a, b)
 #endif
 
