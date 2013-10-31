@@ -110,7 +110,7 @@
 #endif
 
 
-#if defined(__sun__)
+#if defined(__sun__) || defined(__APPLE__) || defined(__FreeBSD__)
 # ifndef __NFDBITS
 #  define __NFDBITS NFDBITS
 # endif
