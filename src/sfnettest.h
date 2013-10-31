@@ -22,8 +22,10 @@
 #include <errno.h>
 #include <ctype.h>
 
-#ifdef __GNUC__
+#if defined(__GNUC__)
 # include "sfnettest_gcc.h"
+#elif defined(_MSC_VER)
+# include "sfnettest_msvc.h"
 #endif
 
 #if defined(__unix__) || defined(__APPLE__)
