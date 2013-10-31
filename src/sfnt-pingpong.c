@@ -97,7 +97,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL2U("n-tcpc",      cfg_n_tcpc,      "include TCP socks in fd set"         ),
   CL2U("n-tcpl",      cfg_n_tcpl,      "include TCP listeners in fds"        ),
   CL1S("tcpc-serv",   cfg_tcpc_serv,   "host:port for tcp conns"             ),
-  CL2U("timeout",     cfg_timeout,     "socket SND?RECV timeout"             ),
+  CL2U("timeout",     cfg_timeout,     "socket SND/RECV timeout"             ),
   CL2S("affinity",    cfg_affinity,    "<client-core>;<server-core>"         ),
   CL2U("n-pings",     cfg_n_pings,     "number of ping messages"             ),
   CL1U("n-pongs",     cfg_n_pongs,     "number of pong messages"             ),
