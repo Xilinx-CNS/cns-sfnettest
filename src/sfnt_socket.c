@@ -136,12 +136,9 @@ int sfnt_ip_multicast_if(int sock, const char* intf)
   struct in_addr sin;
 #if NT_HAVE_IP_MREQN
   struct ip_mreqn r;
-#else
-  struct ip_mreq r;
 #endif
   int rc;
 
-  memset(&r, 0, sizeof(r));
   memset(&sin, 0, sizeof(sin));
 
 #if NT_HAVE_IP_MREQN
