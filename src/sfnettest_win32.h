@@ -384,7 +384,7 @@ static inline int __nt_pthread_cond_timedwait(pthread_cond_t* cond,
   /* Huge hack, abstime is effectively relative as clock_gettime always
    * outputs a zero timespec!
    */
-  ms = ((DWORD)abstime->tv_sec * 1000) + (abstime->tv_nsec / 1000000);
+  ms = (DWORD)((abstime->tv_sec * 1000) + (abstime->tv_nsec / 1000000));
   return SleepConditionVariableCS((PCONDITION_VARIABLE) cond,
                                   (PCRITICAL_SECTION) mutex, ms ) ?
          0 : ETIMEDOUT;
