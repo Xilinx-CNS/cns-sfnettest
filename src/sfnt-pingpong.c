@@ -797,11 +797,8 @@ static void set_sock_timeouts(int sock)
 static void set_sock_timeouts(int sock)
 {
   if( cfg_timeout[0] ) {
-    struct timeval tv;
-    tv.tv_sec = cfg_timeout[0];
-    tv.tv_usec = 0;
-    NT_TRY(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)));
-    NT_TRY(setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)));
+    NT_TRY(sfnt_sock_set_timeout(sock, SO_RCVTIMEO, cfg_timeout[0] * 1000));
+    NT_TRY(sfnt_sock_set_timeout(sock, SO_SNDTIMEO, cfg_timeout[0] * 1000));
   }
 }
 #endif

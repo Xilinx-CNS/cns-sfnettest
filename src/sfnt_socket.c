@@ -204,10 +204,16 @@ int sfnt_ip_add_membership(int sock, in_addr_t mcast_addr, const char* intf)
 
 int sfnt_sock_set_timeout(int sock, int send_or_recv, int millisec)
 {
+#ifdef _WIN32
+  DWORD optval = (DWORD)millisec;
+  return setsockopt(sock, SOL_SOCKET, send_or_recv, (void*)&optval,
+                    sizeof(optval));
+#else
   struct timeval tv;
   tv.tv_sec = millisec / 1000;
   tv.tv_usec = (millisec % 1000) * 1000;
   return setsockopt(sock, SOL_SOCKET, send_or_recv, &tv, sizeof(tv));
+#endif
 }
 
 
