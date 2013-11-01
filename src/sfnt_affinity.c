@@ -12,7 +12,8 @@
 #define _GNU_SOURCE
 #include "sfnettest.h"
 
-#ifdef __linux__
+
+#if defined(__linux__)
 int sfnt_cpu_affinity_set(int core_i)
 {
   cpu_set_t cset;
@@ -21,6 +22,14 @@ int sfnt_cpu_affinity_set(int core_i)
   CPU_ZERO(&cset);
   CPU_SET(core_i, &cset);
   return sched_setaffinity(0, sizeof(cset), &cset);
+}
+#elif defined(_WIN32)
+int sfnt_cpu_affinity_set(int core_i)
+{
+  DWORD_PTR mask = 1ULL << core_i;
+  NT_ASSERT(core_i >= 0);
+  NT_ASSERT(core_i < MAXIMUM_PROC_PER_GROUP);
+  return SetThreadAffinityMask(GetCurrentThread(), mask) ? 0 : -1;
 }
 #else
 int sfnt_cpu_affinity_set(int core_i)
