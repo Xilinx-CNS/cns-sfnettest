@@ -34,6 +34,8 @@
 #define SFNT_SRC_CSUM "<Not calculated>"
 #endif
 
+#define MSG_MORE 0
+
 
 /**********************************************************************
  * Platform configuration

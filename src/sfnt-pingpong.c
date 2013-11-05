@@ -703,6 +703,8 @@ static void server_recv_opts(int ss)
   cfg_n_pongs = sfnt_sock_get_int(ss);
   cfg_nodelay[0] = sfnt_sock_get_int(ss);
   cfg_msg_more[0] = sfnt_sock_get_int(ss);
+  if( cfg_msg_more[0] && MSG_MORE == 0 )
+    sfnt_fail_usage("ERROR: MSG_MORE not supported on this platform");
 }
 
 
@@ -1252,6 +1254,8 @@ int main(int argc, char* argv[])
                 &argc, argv, cfg_opts, N_CFG_OPTS);
   --argc; ++argv;
 
+  if( cfg_msg_more[0] && MSG_MORE == 0 )
+    sfnt_fail_usage("ERROR: MSG_MORE not supported on this platform");
   if( cfg_miniter > cfg_maxiter )
     cfg_maxiter = cfg_miniter;
   if( cfg_minms > cfg_maxms )
