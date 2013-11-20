@@ -142,6 +142,8 @@ int sfnt_ip_multicast_if(int sock, const char* intf)
   memset(&sin, 0, sizeof(sin));
 
 #if NT_HAVE_IP_MREQN
+  memset(&r, 0, sizeof(r));
+
   if( (rc = if_nametoindex(intf)) != 0 ) {
     r.imr_ifindex = rc;
   } else
