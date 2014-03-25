@@ -1685,7 +1685,7 @@ int main(int argc, char* argv[])
   /* fixme: this could be a compile-time check */
   NT_TESTi3(DEFAULT_MSG_SIZE, >=, sizeof(struct msg));
 
-  sfnt_app_getopt("[tcp|udp|pipe|unix_stream|unix_datagram [host[:port]]]",
+  sfnt_app_getopt("[udp [host[:port]]]",
                 &argc, argv, cfg_opts, N_CFG_OPTS);
   --argc; ++argv;
 
