@@ -12,7 +12,6 @@
 
 #include "sfnettest.h"
 
-
 static int         cfg_port = 2048;
 static int         cfg_connect[2];
 static const char* cfg_sizes;
@@ -47,6 +46,7 @@ static const char* cfg_affinity[2];
 static int         cfg_n_pings[2] = { 1, 1 };
 static int         cfg_n_pongs = 1;
 static int         cfg_nodelay[2];
+static unsigned    cfg_busy_poll[2];
 static unsigned    cfg_sleep_gap = 0;
 static unsigned    cfg_spin_gap = 0;
 static unsigned    cfg_msg_more[2];
@@ -102,6 +102,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL2U("n-pings",     cfg_n_pings,     "number of ping messages"             ),
   CL1U("n-pongs",     cfg_n_pongs,     "number of pong messages"             ),
   CL2F("nodelay",     cfg_nodelay,     "enable TCP_NODELAY"                  ),
+  CL2U("busy-poll",   cfg_busy_poll,   "SO_BUSY_POLL (in microseconds)"      ),
   CL1U("sleep-gap",   cfg_sleep_gap,   "gap in usec to sleep between iter"   ),
   CL1U("spin-gap",    cfg_spin_gap,    "gap in usec to spin between iter"    ),
   CL2F("more",        cfg_msg_more,    "MSG_MORE for first n-1 pings/pongs"  ),
@@ -674,6 +675,7 @@ static void client_send_opts(int ss)
   sfnt_sock_put_int(ss, cfg_n_pings[0]);
   sfnt_sock_put_int(ss, cfg_n_pongs);
   sfnt_sock_put_int(ss, cfg_nodelay[1]);
+  sfnt_sock_put_int(ss, cfg_busy_poll[1]);
   sfnt_sock_put_int(ss, cfg_msg_more[1]);
 }
 
@@ -702,6 +704,7 @@ static void server_recv_opts(int ss)
   cfg_n_pings[1] = sfnt_sock_get_int(ss);
   cfg_n_pongs = sfnt_sock_get_int(ss);
   cfg_nodelay[0] = sfnt_sock_get_int(ss);
+  cfg_busy_poll[0] = sfnt_sock_get_int(ss);
   cfg_msg_more[0] = sfnt_sock_get_int(ss);
   if( cfg_msg_more[0] && MSG_MORE == 0 )
     sfnt_fail_usage("ERROR: MSG_MORE not supported on this platform");
@@ -881,8 +884,12 @@ static int do_server2(int ss)
     read_fd = write_fd = the_fds[1];
     break;
   }
-  if( fd_type & FDTF_SOCKET )
+  if( fd_type & FDTF_SOCKET ) {
     set_sock_timeouts(read_fd);
+    if( cfg_busy_poll[0] )
+      NT_TRY(setsockopt(read_fd, SOL_SOCKET, SO_BUSY_POLL, &cfg_busy_poll[0],
+                        sizeof(cfg_busy_poll[0])));
+  }
   add_fds(read_fd);
 
   while( 1 ) {
@@ -1195,7 +1202,12 @@ static int do_client2(int ss, const char* hostport, int local)
     break;
   }
   if( fd_type & FDTF_SOCKET )
+  {
     set_sock_timeouts(read_fd);
+    if( cfg_busy_poll[0] )
+      NT_TRY(setsockopt(read_fd, SOL_SOCKET, SO_BUSY_POLL, &cfg_busy_poll[0],
+                        sizeof(cfg_busy_poll[0])));
+  }
   add_fds(read_fd);
 
   results = malloc(cfg_maxiter * sizeof(*results));

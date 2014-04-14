@@ -37,6 +37,11 @@
 #endif
 
 
+#ifndef SO_BUSY_POLL
+#define SO_BUSY_POLL 46
+#endif
+
+
 /**********************************************************************
  * Command line arg handling.
  */

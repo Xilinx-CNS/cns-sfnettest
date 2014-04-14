@@ -46,6 +46,7 @@ static unsigned    cfg_n_tcpl[2];
 static const char* cfg_tcpc_serv;
 static const char* cfg_affinity[2];
 static int         cfg_nodelay;
+static unsigned    cfg_busy_poll[2];
 static unsigned    cfg_rtt_iter = 10000;
 static int         cfg_debug;
 
@@ -91,6 +92,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1S("tcpc-serv",   cfg_tcpc_serv,   "host:port for tcp conns"             ),
   CL2S("affinity",    cfg_affinity,    "<client-tx>,<client-rx>;<server>"    ),
   CL1F("nodelay",     cfg_nodelay,     "enable TCP_NODELAY"                  ),
+  CL2U("busy-poll",   cfg_busy_poll,   "SO_BUSY_POLL (in microseconds)"      ),
   CL1U("rtt-iter",    cfg_rtt_iter,    "iterations for RTT measurement"      ),
   CL1F("debug",       cfg_debug,       "enable debug logging"                ),
 };
@@ -720,6 +722,7 @@ static void client_send_opts(int ss)
   sfnt_sock_put_int(ss, cfg_n_tcpl[1]);
   sfnt_sock_put_str(ss, cfg_affinity[1]);
   sfnt_sock_put_int(ss, cfg_nodelay);
+  sfnt_sock_put_int(ss, cfg_busy_poll[1]);
 }
 
 
@@ -741,6 +744,7 @@ static void server_recv_opts(int ss)
   cfg_n_tcpl[0] = sfnt_sock_get_int(ss);
   cfg_affinity[0] = sfnt_sock_get_str(ss);
   cfg_nodelay = sfnt_sock_get_int(ss);
+  cfg_busy_poll[0] = sfnt_sock_get_int(ss);
 }
 
 
@@ -818,6 +822,9 @@ static int do_server2(int ss)
   }
   add_fds(sock);
   NT_TRY(sfnt_sock_set_timeout(sock, SO_RCVTIMEO, timeout_ms));
+  if( fd_type & FDTF_SOCKET )
+    NT_TRY(setsockopt(sock, SOL_SOCKET, SO_BUSY_POLL, &cfg_busy_poll[0],
+                      sizeof(cfg_busy_poll[0])));
   sfnt_sock_put_int(ss, sfnt_get_port(sock));
 
   server.ss = ss;
@@ -1616,8 +1623,12 @@ static int do_client2(int ss, const char* hostport, int local)
     ctx->read_fd = ctx->write_fd = the_fds[0];
     break;
   }
-  if( ctx->read_fd >= 0 )
+  if( ctx->read_fd >= 0 ) {
     add_fds(ctx->read_fd);
+    if( fd_type & FDTF_SOCKET )
+      NT_TRY(setsockopt(ctx->read_fd, SOL_SOCKET, SO_BUSY_POLL,
+                        &cfg_busy_poll[0], sizeof(cfg_busy_poll[0])));
+  }
 
   return do_client3(ctx);
 }
