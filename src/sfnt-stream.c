@@ -822,7 +822,7 @@ static int do_server2(int ss)
   }
   add_fds(sock);
   NT_TRY(sfnt_sock_set_timeout(sock, SO_RCVTIMEO, timeout_ms));
-  if( fd_type & FDTF_SOCKET )
+  if( (fd_type & FDTF_SOCKET) && cfg_busy_poll[0] )
     NT_TRY(setsockopt(sock, SOL_SOCKET, SO_BUSY_POLL, &cfg_busy_poll[0],
                       sizeof(cfg_busy_poll[0])));
   sfnt_sock_put_int(ss, sfnt_get_port(sock));
@@ -1625,7 +1625,7 @@ static int do_client2(int ss, const char* hostport, int local)
   }
   if( ctx->read_fd >= 0 ) {
     add_fds(ctx->read_fd);
-    if( fd_type & FDTF_SOCKET )
+    if( (fd_type & FDTF_SOCKET) && cfg_busy_poll[0] )
       NT_TRY(setsockopt(ctx->read_fd, SOL_SOCKET, SO_BUSY_POLL,
                         &cfg_busy_poll[0], sizeof(cfg_busy_poll[0])));
   }
