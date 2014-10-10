@@ -85,7 +85,7 @@ void sfnt_dump_sys_info(const struct sfnt_tsc_params* tsc_opt)
 #ifdef __linux__
     system("cat /proc/cpuinfo | grep 'model name'"
            " | head -1 | sed 's/^/# cpu: /'");
-    system("/sbin/lspci | grep -i net | sed 's/^/# lspci: /'");
+    system("PATH=\"/sbin:$PATH\" lspci | grep -i net | sed 's/^/# lspci: /'");
     system("for if in $(cd /sys/class/net && /bin/ls); do"
            " ethtool -i $if 2>/dev/null | egrep 'bus-info|driver|^vers'"
            " | sed \"s/^/# $if: /\"; done");
