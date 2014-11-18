@@ -30,6 +30,8 @@
 #include <sys/ioctl.h>
 #if defined(__FreeBSD__)
 # include <sys/endian.h>
+# include <sys/param.h>
+# include <sys/cpuset.h>
 #elif defined(__linux__)
 # include <endian.h>
 #elif defined(__APPLE__)
