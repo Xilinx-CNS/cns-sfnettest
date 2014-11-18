@@ -143,6 +143,7 @@ struct msg_reply {
   uint8_t   reply_seq;
   /* Fields unique to reply. */
   uint16_t  unused1;
+  uint32_t  unused2;    /* Align to 64-bit */
   uint64_t  s_timestamp;
   struct gap_stats gap_stats;
 };
