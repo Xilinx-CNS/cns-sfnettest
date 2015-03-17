@@ -82,9 +82,9 @@
 # error "Please decide whether to define MSG_MORE for this platform"
 #endif
 
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 # define NT_HAVE_IP_MREQN 1
-#elif defined(__sun__) || defined(__APPLE__)
+#elif defined(__sun__) || defined(__APPLE__) || defined(__FreeBSD__)
 # define NT_HAVE_IP_MREQN 0
 #else
 # error "Please define NT_HAVE_IP_MREQN for this platform"
