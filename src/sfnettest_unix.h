@@ -140,5 +140,21 @@ typedef int clockid_t;
 extern int clock_gettime(clockid_t clk_id, struct timespec* ts);
 #endif
 
+#ifdef __FreeBSD__
+/*  On FreeBSD UDP send is non blocking and can fail
+ *  We need to capture the ENOBUFF errors and resend if this occur
+ */
+
+extern ssize_t sfnt_send_freebsd(int sockfd, const void *buf, size_t len, int flags);
+
+extern ssize_t sfnt_sendto_freebsd(int sockfd, const void *buf, size_t len, int flags,
+               const struct sockaddr *dest_addr, socklen_t addrlen);
+
+extern ssize_t sfnt_sendmsg_freebsd(int sockfd, const struct msghdr *msg, int flags);
+
+#define send     sfnt_send_freebsd
+#define sendto   sfnt_sendto_freebsd
+#define sendmsg  sfnt_sendmsg_freebsd
+#endif
 
 #endif  /* __SFNETTEST_UNIX_H__ */

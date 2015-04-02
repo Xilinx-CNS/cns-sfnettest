@@ -31,6 +31,7 @@ NETTEST_SRCS	:= sfnt_sysinfo	\
 		sfnt_affinity	\
 		sfnt_mux	\
 		sfnt_fd		\
+		sfnt_nonblocking_send \
 
 ifdef OS_MACOSX
 NETTEST_SRCS	+= sfnt_macosx
