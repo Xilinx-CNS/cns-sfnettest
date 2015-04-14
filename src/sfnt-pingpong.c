@@ -471,7 +471,7 @@ static void do_init(void)
   unsigned core_i;
 
   /* Set affinity first to ensure optimal locality. */
-  if( strcasecmp(cfg_affinity[0], "any") )
+  if( cfg_affinity[0] && strcasecmp(cfg_affinity[0], "any") )
     if( sscanf(cfg_affinity[0], "%u", &core_i) == 1 )
       if( sfnt_cpu_affinity_set(core_i) != 0 ) {
         sfnt_err("ERROR: Failed to set CPU affinity to core %d (%d %s)\n",
@@ -613,11 +613,17 @@ static void add_fds(int us)
     NT_TRY2(sock, socket(PF_INET, SOCK_DGRAM, 0));
     mux_add(sock);
   }
-  for( i = 0; i < cfg_n_tcpc[0]; ++i ) {
-    NT_TRY2(sock, socket(PF_INET, SOCK_STREAM, 0));
-    NT_TRY(sfnt_connect(sock, cfg_tcpc_serv, NULL, -1));
-    mux_add(sock);
+  if( cfg_tcpc_serv ) {
+    for( i = 0; i < cfg_n_tcpc[0]; ++i ) {
+      NT_TRY2(sock, socket(PF_INET, SOCK_STREAM, 0));
+      NT_TRY(sfnt_connect(sock, cfg_tcpc_serv, NULL, -1));
+      mux_add(sock);
+    }
+  } else if( cfg_n_tcpc[0] > 0 ) {
+    sfnt_err("ERROR: --n-tcpc specified, but no --tcpc-serv address\n" );
+    sfnt_fail_test();
   }
+
   for( i = 0; i < cfg_n_tcpl[0]; ++i ) {
     NT_TRY2(sock, socket(PF_INET, SOCK_STREAM, 0));
     NT_TRY(listen(sock, 1));

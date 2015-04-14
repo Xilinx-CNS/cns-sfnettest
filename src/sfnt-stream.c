@@ -667,10 +667,15 @@ static void add_fds(int us)
     NT_TRY2(sock, socket(PF_INET, SOCK_DGRAM, 0));
     mux_add(sock);
   }
-  for( i = 0; i < cfg_n_tcpc[0]; ++i ) {
-    NT_TRY2(sock, socket(PF_INET, SOCK_STREAM, 0));
-    NT_TRY(sfnt_connect(sock, cfg_tcpc_serv, NULL, -1));
-    mux_add(sock);
+  if( cfg_tcpc_serv ) {
+    for( i = 0; i < cfg_n_tcpc[0]; ++i ) {
+      NT_TRY2(sock, socket(PF_INET, SOCK_STREAM, 0));
+      NT_TRY(sfnt_connect(sock, cfg_tcpc_serv, NULL, -1));
+      mux_add(sock);
+    }
+  } else if( cfg_n_tcpc[0] > 0 ) {
+    sfnt_err("ERROR: --n-tcpc specified, but no --tcpc-serv address\n" );
+    sfnt_fail_test();
   }
   for( i = 0; i < cfg_n_tcpl[0]; ++i ) {
     NT_TRY2(sock, socket(PF_INET, SOCK_STREAM, 0));
@@ -784,7 +789,7 @@ static int do_server2(int ss)
   server_recv_opts(ss);
   sfnt_sock_put_str(ss, getenv("LD_PRELOAD"));
 
-  if( strcasecmp(cfg_affinity[0], "any") ) {
+  if( cfg_affinity[0] && strcasecmp(cfg_affinity[0], "any") ) {
     int core_i;
     if( sscanf(cfg_affinity[0], "%u", &core_i) != 1 )
       sfnt_fail_usage("ERROR: bad argument for --affinity");
@@ -1040,7 +1045,7 @@ static void* client_rx_thread(void* arg)
   struct sockaddr_in sin;
 
   /* Set affinity first to ensure optimal locality. */
-  if( strcasecmp(cfg_affinity[0], "any") )
+  if( cfg_affinity[0] && strcasecmp(cfg_affinity[0], "any") )
     cpu_affinity_set(client_rx_core_i);
   crx->reply_buf_len = 64 * 1024;
   crx->reply = malloc(crx->reply_buf_len);
@@ -1557,7 +1562,7 @@ static int do_client2(int ss, const char* hostport, int local)
   ctx->ss = ss;
   ctx->crx = client_rx_thread_start();
 
-  if( sfnt_ilist_parse(&ctx->rates, cfg_rates) != 0 )
+  if( ! cfg_rates || sfnt_ilist_parse(&ctx->rates, cfg_rates) != 0 )
     sfnt_fail_usage("ERROR: Malformed argument to option --rates");
 
   ctx->server_ld_preload = sfnt_sock_get_str(ss);
