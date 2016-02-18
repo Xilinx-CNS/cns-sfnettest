@@ -112,7 +112,13 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL2U("warm",        cfg_warm,        "Use MSG_WARM in usecs gap (must be < spin-gap)"),
   CL2I("template",    cfg_tmpl_send,   "Use templated_sends and update thispercentage of bytes"),
 };
+
+
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
+
+union handle {
+  int fd;
+};
 
 
 struct stats {
@@ -125,19 +131,19 @@ struct stats {
 };
 
 
-enum fd_type_flags {
-  FDTF_SOCKET = 0x100,
-  FDTF_LOCAL  = 0x200,
-  FDTF_STREAM = 0x400,
+enum handle_type_flags {
+  HTF_SOCKET = 0x100,
+  HTF_LOCAL  = 0x200,
+  HTF_STREAM = 0x400,
 };
 
 
-enum fd_type {
-  FDT_TCP     = 0 | FDTF_SOCKET | 0          | FDTF_STREAM,
-  FDT_UDP     = 1 | FDTF_SOCKET | 0          | 0,
-  FDT_PIPE    = 2 | 0           | FDTF_LOCAL | FDTF_STREAM,
-  FDT_UNIX_S  = 3 | FDTF_SOCKET | FDTF_LOCAL | FDTF_STREAM,
-  FDT_UNIX_D  = 4 | FDTF_SOCKET | FDTF_LOCAL | 0,
+enum handle_type {
+  HT_TCP     = 0 | HTF_SOCKET | 0         | HTF_STREAM,
+  HT_UDP     = 1 | HTF_SOCKET | 0         | 0,
+  HT_PIPE    = 2 | 0          | HTF_LOCAL | HTF_STREAM,
+  HT_UNIX_S  = 3 | HTF_SOCKET | HTF_LOCAL | HTF_STREAM,
+  HT_UNIX_D  = 4 | HTF_SOCKET | HTF_LOCAL | 0,
 };
 
 struct user_info {
@@ -159,13 +165,13 @@ static struct msghdr zc_msg;
 static struct iovec zc_iov;
 struct onload_zc_recv_args zc_args;
 
-static enum fd_type   fd_type;
-static int            the_fds[4];  /* used for pipes and unix sockets */
+static enum handle_type handle_type;
+static int              the_fds[4];  /* used for pipes and unix sockets */
 
-static fd_set         select_fdset;
-static int            select_fds[MAX_FDS];
-static int            select_n_fds;
-static int            select_max_fd;
+static fd_set           select_fdset;
+static int              select_fds[MAX_FDS];
+static int              select_n_fds;
+static int              select_max_fd;
 
 static struct sockaddr_in  my_sa;
 static struct sockaddr_in  peer_sa;
@@ -187,10 +193,10 @@ static int                 pfds_n;
 static int                 epoll_fd;
 #endif
 
-static ssize_t (*do_recv)(int, void*, size_t, int);
-static ssize_t (*do_send)(int, const void*, size_t, int);
+static ssize_t (*do_recv)(union handle, void*, size_t, int);
+static ssize_t (*do_send)(union handle, const void*, size_t, int);
 
-static ssize_t (*mux_recv)(int, void*, size_t, int);
+static ssize_t (*mux_recv)(union handle, void*, size_t, int);
 static void (*mux_add)(int fd);
 
 
@@ -209,7 +215,7 @@ void alarm_handler()
 }
 
 
-ssize_t solaris_recv(int s, void *buf, size_t len, int flags)
+ssize_t solaris_recv(union handle h, void *buf, size_t len, int flags)
 {
   int rc = 0;
 
@@ -217,7 +223,7 @@ ssize_t solaris_recv(int s, void *buf, size_t len, int flags)
   if( cfg_timeout[0] )
     alarm(cfg_timeout[0]);
 
-  rc = recv(s, buf, len, flags);
+  rc = recv(h.fd, buf, len, flags);
   if(rc == -1 && errno == EINTR) {
     errno = ETIMEDOUT;
   }
@@ -226,34 +232,41 @@ ssize_t solaris_recv(int s, void *buf, size_t len, int flags)
   return rc;
 }
 #else
-#define rfn_recv recv
+inline ssize_t rfn_recv(union handle h, void* buf, size_t len, int flags)
+{
+  return recv(h.fd, buf, len, flags);
+}
 #endif
 
 
-static ssize_t sfn_sendto(int fd, const void* buf, size_t len, int flags)
+static ssize_t sfn_sendto(union handle h, const void* buf, size_t len,
+                          int flags)
 {
-  return sendto(fd, buf, len, 0, to_sa, to_sa_len);
+  return sendto(h.fd, buf, len, 0, to_sa, to_sa_len);
 }
 
 
-#define sfn_send  send
+inline ssize_t sfn_send(union handle h, const void* buf, size_t len, int flags)
+{
+  return send(h.fd, buf, len, flags);
+}
 
 
-static ssize_t rfn_read(int fd, void* buf, size_t len, int flags)
+static ssize_t rfn_read(union handle h, void* buf, size_t len, int flags)
 {
   /* NB. To support non-blocking semantics caller must have set O_NONBLOCK. */
   int rc, got = 0, all = flags & MSG_WAITALL;
   do {
-    if( (rc = read(fd, (char*) buf + got, len - got)) > 0 )
+    if( (rc = read(h.fd, (char*) buf + got, len - got)) > 0 )
       got += rc;
   } while( all && got < len && rc > 0 );
   return got ? got : rc;
 }
 
 
-static ssize_t sfn_write(int fd, const void* buf, size_t len, int flags)
+static ssize_t sfn_write(union handle h, const void* buf, size_t len, int flags)
 {
-  return write(fd, buf, len);
+  return write(h.fd, buf, len);
 }
 
 /**********************************************************************/
@@ -295,7 +308,7 @@ zc_recv_callback(struct onload_zc_recv_args *args, int flag)
 
 /**********************************************************************/
 
-static ssize_t do_recv_zc(int fd, void* buf, size_t len, int flags)
+static ssize_t do_recv_zc(union handle h, void* buf, size_t len, int flags)
 {
   struct user_info info;
   int rc;
@@ -309,9 +322,9 @@ static ssize_t do_recv_zc(int fd, void* buf, size_t len, int flags)
   if( flags & MSG_DONTWAIT )
     zc_args.flags |= ONLOAD_MSG_DONTWAIT;
 
-  rc = onload_zc_recv(fd, &zc_args);
+  rc = onload_zc_recv(h.fd, &zc_args);
   if( rc == -ENOTEMPTY ) {
-    if( ( rc = onload_recvmsg_kernel(fd, &zc_msg, 0) ) < 0 )
+    if( ( rc = onload_recvmsg_kernel(h.fd, &zc_msg, 0) ) < 0 )
       printf("onload_recvmsg_kernel failed\n");
   } 
   else if( rc == 0 ) {
@@ -324,7 +337,8 @@ static ssize_t do_recv_zc(int fd, void* buf, size_t len, int flags)
 }
 
 
-static ssize_t do_send_zc(int fd, const void* buf, size_t len, int flags)
+static ssize_t do_send_zc(union handle h, const void* buf, size_t len,
+                          int flags)
 {
   int bytes_done, rc, i, bufs_needed;
 
@@ -333,7 +347,7 @@ static ssize_t do_send_zc(int fd, const void* buf, size_t len, int flags)
    * consumed before returning.
    */
 
-  zc_mmsg.fd = fd;
+  zc_mmsg.fd = h.fd;
   zc_mmsg.msg.iov = zc_iovec;
 
   bytes_done = 0;
@@ -373,7 +387,7 @@ static ssize_t do_send_zc(int fd, const void* buf, size_t len, int flags)
            * these buffers, but seems pointless as we guarantee at the
            * end of this function to have iovec array full, so do nothing.
            *
-           *  onload_zc_release_buffers(fd, &zc_iovec[i].buf, 0)
+           *  onload_zc_release_buffers(h.fd, &zc_iovec[i].buf, 0)
            */
         }
         else {
@@ -394,7 +408,7 @@ static ssize_t do_send_zc(int fd, const void* buf, size_t len, int flags)
       }
 
       if( bufs_needed ) {
-        rc = onload_zc_alloc_buffers(fd, zc_iovec, bufs_needed, 
+        rc = onload_zc_alloc_buffers(h.fd, zc_iovec, bufs_needed, 
                                      ONLOAD_ZC_BUFFER_HDR_TCP);
         NT_ASSERT(rc == 0);
       }
@@ -465,7 +479,8 @@ static void do_tmpl_abort(int sock_fd)
 }
 
 
-static ssize_t do_send_tmpl(int fd, const void* buf, size_t len, int flags)
+static ssize_t do_send_tmpl(union handle h, const void* buf, size_t len,
+                            int flags)
 {
   int rc;
   NT_ASSERT(tmpl_update_size >= 0 && tmpl_update_size <= len);
@@ -478,7 +493,7 @@ static ssize_t do_send_tmpl(int fd, const void* buf, size_t len, int flags)
 
   if( tmpl_update_size == 0 ) {
     /* Send with no updates */
-    rc = onload_msg_template_update(fd, tmpl_handle, NULL, 0,
+    rc = onload_msg_template_update(h.fd, tmpl_handle, NULL, 0,
                                     ONLOAD_TEMPLATE_FLAGS_SEND_NOW);
   }
   else {
@@ -492,11 +507,11 @@ static ssize_t do_send_tmpl(int fd, const void* buf, size_t len, int flags)
       .otmu_offset = 0,
       .otmu_flags  = 0,
     };
-    rc = onload_msg_template_update(fd, tmpl_handle, &otmu, 1,
+    rc = onload_msg_template_update(h.fd, tmpl_handle, &otmu, 1,
                                     ONLOAD_TEMPLATE_FLAGS_SEND_NOW);
   }
   NT_ASSERT(rc == 0);
-  do_tmpl_alloc(fd, buf, len, flags);
+  do_tmpl_alloc(h.fd, buf, len, flags);
   return len;
 }
 
@@ -518,7 +533,7 @@ static void select_add(int fd)
 }
 
 
-static ssize_t select_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t select_recv(union handle h, void* buf, size_t len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   int i, rc, got = 0, all = flags & MSG_WAITALL;
@@ -531,8 +546,8 @@ static ssize_t select_recv(int fd, void* buf, size_t len, int flags)
     rc = sfnt_select(select_max_fd + 1, &select_fdset, NULL, NULL, &tsc,
                      timeout_ms, mux_flags);
     if( rc == 1 ) {
-      NT_TEST(FD_ISSET(fd, &select_fdset));
-      if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
+      NT_TEST(FD_ISSET(h.fd, &select_fdset));
+      if( (rc = do_recv(h, (char*) buf + got, len - got, flags)) > 0 )
         got += rc;
     }
     else {
@@ -560,7 +575,7 @@ static void poll_add(int fd)
 }
 
 
-static ssize_t poll_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t poll_recv(union handle h, void* buf, size_t len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   int rc, got = 0, all = flags & MSG_WAITALL;
@@ -571,7 +586,7 @@ static ssize_t poll_recv(int fd, void* buf, size_t len, int flags)
     rc = sfnt_poll(pfds, pfds_n, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(pfds[0].revents & POLLIN);
-      if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
+      if( (rc = do_recv(h, (char*) buf + got, len - got, flags)) > 0 )
         got += rc;
     }
     else {
@@ -605,7 +620,7 @@ static void epoll_add(int fd)
 }
 
 
-static ssize_t epoll_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t epoll_recv(union handle h, void* buf, size_t len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   struct epoll_event e;
@@ -617,7 +632,7 @@ static ssize_t epoll_recv(int fd, void* buf, size_t len, int flags)
     rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
-      if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
+      if( (rc = do_recv(h, (char*) buf + got, len - got, flags)) > 0 )
         got += rc;
     }
     else {
@@ -632,7 +647,7 @@ static ssize_t epoll_recv(int fd, void* buf, size_t len, int flags)
 }
 
 
-static ssize_t epoll_mod_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t epoll_mod_recv(union handle h, void* buf, size_t len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   struct epoll_event e;
@@ -641,12 +656,12 @@ static ssize_t epoll_mod_recv(int fd, void* buf, size_t len, int flags)
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
   e.events = EPOLLIN;
-  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &e));
+  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, h.fd, &e));
   do {
     rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
-      if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
+      if( (rc = do_recv(h, (char*) buf + got, len - got, flags)) > 0 )
         got += rc;
     }
     else {
@@ -658,12 +673,13 @@ static ssize_t epoll_mod_recv(int fd, void* buf, size_t len, int flags)
     }
   } while( all && got < len && rc > 0 );
   e.events = 0;
-  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &e));
+  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, h.fd, &e));
   return got ? got : rc;
 }
 
 
-static ssize_t epoll_adddel_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t epoll_adddel_recv(union handle h, void* buf, size_t len,
+                                 int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   struct epoll_event e;
@@ -672,12 +688,12 @@ static ssize_t epoll_adddel_recv(int fd, void* buf, size_t len, int flags)
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
   e.events = EPOLLIN;
-  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &e));
+  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, h.fd, &e));
   do {
     rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
-      if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
+      if( (rc = do_recv(h, (char*) buf + got, len - got, flags)) > 0 )
         got += rc;
     }
     else {
@@ -689,7 +705,7 @@ static ssize_t epoll_adddel_recv(int fd, void* buf, size_t len, int flags)
     }
   } while( all && got < len && rc > 0 );
   e.events = 0;
-  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, &e));
+  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, h.fd, &e));
   return got ? got : rc;
 }
 
@@ -697,12 +713,12 @@ static ssize_t epoll_adddel_recv(int fd, void* buf, size_t len, int flags)
 
 /**********************************************************************/
 
-static ssize_t spin_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t spin_recv(union handle h, void* buf, size_t len, int flags)
 {
   int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   do {
-    while( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) < 0 )
+    while( (rc = do_recv(h, (char*) buf + got, len - got, flags)) < 0 )
       if( errno != EAGAIN )
         goto out;
     got += rc;
@@ -712,16 +728,16 @@ static ssize_t spin_recv(int fd, void* buf, size_t len, int flags)
 }
 
 
-static ssize_t warm_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t warm_recv(union handle h, void* buf, size_t len, int flags)
 {
   int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   do {
-    rc = do_recv(fd, (char*) buf + got, len - got, flags);
+    rc = do_recv(h, (char*) buf + got, len - got, flags);
     if( rc < 0 ) {
       if( errno != EAGAIN )
         goto out;
-      NT_TRY(send(fd, buf, 1, ONLOAD_MSG_WARM));
+      NT_TRY(send(h.fd, buf, 1, ONLOAD_MSG_WARM));
       /* Set rc to pass the while condition. */
       rc = 1;
     }
@@ -755,14 +771,14 @@ static void set_ttl(int sock, int ttl)
 static void do_zc_init(int write_fd)
 {
   if( cfg_zc[0] ) {
-    if( (fd_type != FDT_UDP) && (fd_type != FDT_TCP) )
+    if( (handle_type != HT_UDP) && (handle_type != HT_TCP) )
       sfnt_fail_usage("ERROR: zerocopy support only available for UDP and TCP");
 
-    if( fd_type == FDT_UDP ) {
+    if( handle_type == HT_UDP ) {
       memset(&zc_args, 0, sizeof(zc_args));
       zc_args.cb = &zc_recv_callback;
     }
-    if( fd_type == FDT_TCP )
+    if( handle_type == HT_TCP )
       NT_TRY(onload_zc_alloc_buffers(write_fd, &zc_iovec[0], NUM_ZC_BUFFERS,
                                      ONLOAD_ZC_BUFFER_HDR_TCP));
   }
@@ -791,7 +807,7 @@ static void do_init(void)
 
   NT_TRY(sfnt_tsc_get_params(&tsc));
 
-  if( fd_type == FDT_UDP && ! cfg_connect[0] ) {
+  if( handle_type == HT_UDP && ! cfg_connect[0] ) {
     if( cfg_tmpl_send[0] != -1 ) {
       sfnt_err("ERROR: templated sends not supported for UDP\n");
       sfnt_fail_setup();
@@ -802,17 +818,17 @@ static void do_init(void)
       do_recv = rfn_recv;
     do_send = sfn_sendto;
   }
-  else if( fd_type & FDTF_SOCKET ) {
-    if( cfg_zc[0] && (fd_type == FDT_TCP) )
+  else if( handle_type & HTF_SOCKET ) {
+    if( cfg_zc[0] && (handle_type == HT_TCP) )
       do_send = do_send_zc;
     else
       do_send = sfn_send;
-    if( cfg_zc[0] && (fd_type == FDT_UDP) )
+    if( cfg_zc[0] && (handle_type == HT_UDP) )
       do_recv = do_recv_zc;
     else
       do_recv = rfn_recv;
     if( cfg_tmpl_send[0] != -1 ) {
-      if( fd_type == FDT_UDP ) {
+      if( handle_type == HT_UDP ) {
         sfnt_err("ERROR: templated sends not supported for UDP\n");
         sfnt_fail_setup();
       }
@@ -865,7 +881,7 @@ static void do_init(void)
 }
 
 
-static void do_ping(int read_fd, int write_fd, int sz)
+static void do_ping(union handle read_h, union handle write_h, int sz)
 {
   int i, rc;
 
@@ -879,17 +895,17 @@ static void do_ping(int read_fd, int write_fd, int sz)
   zc_msg.msg_iov->iov_len = sz;
 
   for( i = 0; i < cfg_n_pings; ++i ) {
-    rc = do_send(write_fd, ppbuf, sz, 0);
+    rc = do_send(write_h, ppbuf, sz, 0);
     NT_TESTi3(rc, ==, sz);
   }
   for( i = 0; i < cfg_n_pongs; ++i ) {
-    rc = mux_recv(read_fd, ppbuf, sz, MSG_WAITALL);
+    rc = mux_recv(read_h, ppbuf, sz, MSG_WAITALL);
     NT_TESTi3(rc, ==, sz);
   }
 }
 
 
-static void do_pong(int read_fd, int write_fd, int sz)
+static void do_pong(union handle read_h, union handle write_h, int sz)
 {
   int i, rc;
 
@@ -904,11 +920,11 @@ static void do_pong(int read_fd, int write_fd, int sz)
 
   for( i = 0; i < cfg_n_pings; ++i ) {
     /* NB. Solaris doesn't block in UDP recv with 0 length buffer. */
-    rc = mux_recv(read_fd, ppbuf, sz ? sz : 1, MSG_WAITALL);
+    rc = mux_recv(read_h, ppbuf, sz ? sz : 1, MSG_WAITALL);
     NT_TESTi3(rc, ==, sz);
   }
   for( i = 0; i < cfg_n_pongs; ++i ) {
-    rc = do_send(write_fd, ppbuf, sz, 0);
+    rc = do_send(write_h, ppbuf, sz, 0);
     NT_TESTi3(rc, ==, sz);
   }
 }
@@ -992,7 +1008,7 @@ static void server_check_ver(int ss)
 
 static void client_send_opts(int ss)
 {
-  sfnt_sock_put_int(ss, fd_type);
+  sfnt_sock_put_int(ss, handle_type);
   sfnt_sock_put_int(ss, cfg_connect[1]);
   sfnt_sock_put_int(ss, cfg_spin[1]);
   sfnt_sock_put_str(ss, cfg_muxer[1]);
@@ -1021,7 +1037,7 @@ static void client_send_opts(int ss)
 
 static void server_recv_opts(int ss)
 {
-  fd_type = sfnt_sock_get_int(ss);
+  handle_type = sfnt_sock_get_int(ss);
   cfg_connect[0] = sfnt_sock_get_int(ss);
   cfg_spin[0] = sfnt_sock_get_int(ss);
   cfg_muxer[0] = sfnt_sock_get_str(ss);
@@ -1191,7 +1207,7 @@ static int do_server(void)
 static int do_server2(int ss)
 {
   int sl, iter, msg_size;
-  int read_fd, write_fd;
+  union handle read_handle, write_handle;
 
   server_check_ver(ss);
   server_recv_opts(ss);
@@ -1201,8 +1217,8 @@ static int do_server2(int ss)
   do_init();
 
   /* Create and bind/connect test socket. */
-  switch( fd_type ) {
-  case FDT_TCP: {
+  switch( handle_type ) {
+  case HT_TCP: {
     struct sockaddr_in sa;
     socklen_t sa_len = sizeof(sa);
     int one = 1;
@@ -1212,37 +1228,38 @@ static int do_server2(int ss)
     NT_TRY(listen(sl, 1));
     NT_TRY(getsockname(sl, (struct sockaddr*) &sa, &sa_len));
     sfnt_sock_put_int(ss, ntohs(sa.sin_port));
-    NT_TRY2(read_fd, accept(sl, NULL, NULL));
-    write_fd = read_fd;
+    NT_TRY2(read_handle.fd, accept(sl, NULL, NULL));
+    write_handle.fd = read_handle.fd;
     if( cfg_nodelay[0] )
-      NT_TRY(setsockopt(write_fd, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
+      NT_TRY(setsockopt(write_handle.fd, SOL_TCP, TCP_NODELAY, &one,
+                        sizeof(one)));
     close(sl);
     sl = -1;
     break;
   }
-  case FDT_UDP:
-    NT_TRY2(read_fd, socket(PF_INET, SOCK_DGRAM, 0));
-    udp_bind_sock(read_fd, ss);
-    udp_exchange_addrs(read_fd, ss);
-    write_fd = read_fd;
+  case HT_UDP:
+    NT_TRY2(read_handle.fd, socket(PF_INET, SOCK_DGRAM, 0));
+    udp_bind_sock(read_handle.fd, ss);
+    udp_exchange_addrs(read_handle.fd, ss);
+    write_handle.fd = read_handle.fd;
     break;
-  case FDT_PIPE:
-    read_fd = the_fds[2];
-    write_fd = the_fds[1];
+  case HT_PIPE:
+    read_handle.fd = the_fds[2];
+    write_handle.fd = the_fds[1];
     if( cfg_spin[0] ) {
-      sfnt_fd_set_nonblocking(read_fd);
-      sfnt_fd_set_nonblocking(write_fd);
+      sfnt_fd_set_nonblocking(read_handle.fd);
+      sfnt_fd_set_nonblocking(write_handle.fd);
     }
     break;
-  case FDT_UNIX_S:
-  case FDT_UNIX_D:
-    read_fd = write_fd = the_fds[1];
+  case HT_UNIX_S:
+  case HT_UNIX_D:
+    read_handle.fd = write_handle.fd = the_fds[1];
     break;
   }
-  if( fd_type & FDTF_SOCKET )
-    set_sock_timeouts(read_fd);
-  add_fds(read_fd);
-  do_zc_init(write_fd);
+  if( handle_type & HTF_SOCKET )
+    set_sock_timeouts(read_handle.fd);
+  add_fds(read_handle.fd);
+  do_zc_init(write_handle.fd);
 
   while( 1 ) {
     iter = sfnt_sock_get_int(ss);
@@ -1252,12 +1269,12 @@ static int do_server2(int ss)
 
     if( cfg_tmpl_send[0] != -1 ) {
       tmpl_update_size = msg_size * cfg_tmpl_send[0] / 100;
-      do_tmpl_alloc(read_fd, ppbuf, msg_size, 0);
+      do_tmpl_alloc(read_handle.fd, ppbuf, msg_size, 0);
     }
     while( iter-- )
-      do_pong(read_fd, write_fd, msg_size);
+      do_pong(read_handle, write_handle, msg_size);
     if( cfg_tmpl_send[0] != -1 )
-      do_tmpl_abort(write_fd);
+      do_tmpl_abort(write_handle.fd);
   }
 
   NT_TESTi3(recv(ss, ppbuf, 1, 0), ==, 0);
@@ -1266,8 +1283,8 @@ static int do_server2(int ss)
 }
 
 
-static void do_pings(int ss, int read_fd, int write_fd, int msg_size,
-                     int iter, int* results)
+static void do_pings(int ss, union handle read_h, union handle write_h,
+                     int msg_size, int iter, int* results)
 {
   uint64_t start, stop;
   unsigned time_cnt = 0;
@@ -1277,7 +1294,7 @@ static void do_pings(int ss, int read_fd, int write_fd, int msg_size,
   sfnt_sock_put_int(ss, iter + 1); /* +1 as initial ping  below */
   sfnt_sock_put_int(ss, msg_size);
   if( cfg_tmpl_send[0] != -1 ) {
-    do_tmpl_alloc(read_fd, ppbuf, msg_size, 0);
+    do_tmpl_alloc(read_h.fd, ppbuf, msg_size, 0);
     tmpl_update_size = msg_size * cfg_tmpl_send[0] / 100;
   }
 
@@ -1285,11 +1302,11 @@ static void do_pings(int ss, int read_fd, int write_fd, int msg_size,
   memset(results, 0, iter * sizeof(results[0]));
 
   /* Ensure server is ready. */
-  do_ping(read_fd, write_fd, msg_size);
+  do_ping(read_h, write_h, msg_size);
 
   for( i = 0; i < iter; ++i ) {
     sfnt_tsc(&start);
-    do_ping(read_fd, write_fd, msg_size);
+    do_ping(read_h, write_h, msg_size);
     sfnt_tsc(&stop);
     results[i] = (int) sfnt_tsc_nsec(&tsc, stop - start - tsc.tsc_cost);
     if( ! cfg_rtt )
@@ -1301,7 +1318,7 @@ static void do_pings(int ss, int read_fd, int write_fd, int msg_size,
         time_cnt = 0;
         for(time_cnt = 0; time_cnt < cfg_spin_gap; time_cnt += cfg_warm[0] ) {
           sfnt_tsc_usleep(&tsc, cfg_warm[0]);
-          NT_TRY(send(write_fd, buf, 1, ONLOAD_MSG_WARM));
+          NT_TRY(send(write_h.fd, buf, 1, ONLOAD_MSG_WARM));
         }
       }
       else {
@@ -1310,7 +1327,7 @@ static void do_pings(int ss, int read_fd, int write_fd, int msg_size,
     }
   }
   if( cfg_tmpl_send[0] != -1 )
-    do_tmpl_abort(write_fd);
+    do_tmpl_abort(write_h.fd);
 }
 
 
@@ -1345,7 +1362,7 @@ static void write_raw_results(int msg_size, int* results, int results_n)
 }
 
 
-static void do_test(int ss, int read_fd, int write_fd,
+static void do_test(int ss, union handle read_handle, union handle write_handle,
                     int msg_size, int* results)
 {
   int n_this_time = cfg_miniter;
@@ -1360,7 +1377,7 @@ static void do_test(int ss, int read_fd, int write_fd,
       n_this_time = cfg_maxiter - results_n;
 
     /* n_this_time can be 0 if minms not yet met */
-    do_pings(ss, read_fd, write_fd, msg_size,
+    do_pings(ss, read_handle, write_handle, msg_size,
              n_this_time, results + results_n);
     results_n += n_this_time;
 
@@ -1390,7 +1407,7 @@ static unsigned log2_le(unsigned n)
 
 static int next_msg_size(int prev_msg_size)
 {
-  if( fd_type & FDTF_STREAM )
+  if( handle_type & HTF_STREAM )
     return prev_msg_size * 2;
 
   switch( prev_msg_size ) {
@@ -1438,38 +1455,38 @@ static int do_client2(int ss, const char* hostport, int local);
 static int do_client(int argc, char* argv[])
 {
   const char* hostport;
-  const char* fd_type_s;
+  const char* handle_type_s;
   pid_t pid;
 
   if( argc < 1 || argc > 2 )
     sfnt_fail_usage("wrong number of arguments");
-  fd_type_s = argv[0];
-  if( ! strcasecmp(fd_type_s, "tcp") )
-    fd_type = FDT_TCP;
-  else if( ! strcasecmp(fd_type_s, "udp") )
-    fd_type = FDT_UDP;
-  else if( ! strcasecmp(fd_type_s, "pipe") )
-    fd_type = FDT_PIPE;
-  else if( ! strcasecmp(fd_type_s, "unix_stream") )
-    fd_type = FDT_UNIX_S;
-  else if( ! strcasecmp(fd_type_s, "unix_datagram") )
-    fd_type = FDT_UNIX_D;
+  handle_type_s = argv[0];
+  if( ! strcasecmp(handle_type_s, "tcp") )
+    handle_type = HT_TCP;
+  else if( ! strcasecmp(handle_type_s, "udp") )
+    handle_type = HT_UDP;
+  else if( ! strcasecmp(handle_type_s, "pipe") )
+    handle_type = HT_PIPE;
+  else if( ! strcasecmp(handle_type_s, "unix_stream") )
+    handle_type = HT_UNIX_S;
+  else if( ! strcasecmp(handle_type_s, "unix_datagram") )
+    handle_type = HT_UNIX_D;
   else
-    sfnt_fail_usage("unknown fd_type '%s'", fd_type_s);
+    sfnt_fail_usage("unknown handle_type '%s'", handle_type_s);
 
-  if( fd_type & FDTF_LOCAL ) {
+  if( handle_type & HTF_LOCAL ) {
     int ss[2];
     if( argc != 1 )
       sfnt_fail_usage("wrong number of arguments for local socket");
-    switch( fd_type ) {
-    case FDT_PIPE:
+    switch( handle_type ) {
+    case HT_PIPE:
       NT_TRY(pipe(the_fds));
       NT_TRY(pipe(the_fds + 2));
       break;
-    case FDT_UNIX_S:
+    case HT_UNIX_S:
       NT_TRY(socketpair(PF_UNIX, SOCK_STREAM, 0, the_fds));
       break;
-    case FDT_UNIX_D:
+    case HT_UNIX_D:
       NT_TRY(socketpair(PF_UNIX, SOCK_DGRAM, 0, the_fds));
       break;
     default:
@@ -1511,7 +1528,7 @@ static int do_client(int argc, char* argv[])
 static int do_client2(int ss, const char* hostport, int local)
 {
   struct sfnt_ilist msg_sizes;
-  int read_fd, write_fd;
+  union handle read_handle, write_handle;
   char* server_ld_preload;
   int msg_size;
   int* results;
@@ -1548,43 +1565,43 @@ static int do_client2(int ss, const char* hostport, int local)
   server_ld_preload = sfnt_sock_get_str(ss);
 
   /* Create and bind/connect test socket. */
-  switch( fd_type ) {
-  case FDT_TCP: {
+  switch( handle_type ) {
+  case HT_TCP: {
     char host[strlen(hostport) + 1];
     char* p;
     strcpy(host, hostport);
     if( (p = strchr(host, ':')) != NULL )
       *p = '\0';
     int port = sfnt_sock_get_int(ss);
-    NT_TRY2(read_fd, socket(PF_INET, SOCK_STREAM, 0));
+    NT_TRY2(read_handle.fd, socket(PF_INET, SOCK_STREAM, 0));
     if( cfg_nodelay[0] )
-      NT_TRY(setsockopt(read_fd, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
-    NT_TRY(sfnt_connect(read_fd, host, NULL, port));
-    write_fd = read_fd;
+      NT_TRY(setsockopt(read_handle.fd, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
+    NT_TRY(sfnt_connect(read_handle.fd, host, NULL, port));
+    write_handle.fd = read_handle.fd;
     break;
   }
-  case FDT_UDP:
-    NT_TRY2(read_fd, socket(PF_INET, SOCK_DGRAM, 0));
-    udp_bind_sock(read_fd, ss);
-    udp_exchange_addrs(read_fd, ss);
-    write_fd = read_fd;
+  case HT_UDP:
+    NT_TRY2(read_handle.fd, socket(PF_INET, SOCK_DGRAM, 0));
+    udp_bind_sock(read_handle.fd, ss);
+    udp_exchange_addrs(read_handle.fd, ss);
+    write_handle.fd = read_handle.fd;
     break;
-  case FDT_PIPE:
-    read_fd = the_fds[0];
-    write_fd = the_fds[3];
+  case HT_PIPE:
+    read_handle.fd = the_fds[0];
+    write_handle.fd = the_fds[3];
     if( cfg_spin[0] ) {
-      sfnt_fd_set_nonblocking(read_fd);
-      sfnt_fd_set_nonblocking(write_fd);
+      sfnt_fd_set_nonblocking(read_handle.fd);
+      sfnt_fd_set_nonblocking(write_handle.fd);
     }
     break;
-  case FDT_UNIX_S:
-  case FDT_UNIX_D:
-    read_fd = write_fd = the_fds[0];
+  case HT_UNIX_S:
+  case HT_UNIX_D:
+    read_handle.fd = write_handle.fd = the_fds[0];
     break;
   }
-  if( fd_type & FDTF_SOCKET )
-    set_sock_timeouts(read_fd);
-  add_fds(read_fd);
+  if( handle_type & HTF_SOCKET )
+    set_sock_timeouts(read_handle.fd);
+  add_fds(read_handle.fd);
 
   results = malloc(cfg_maxiter * sizeof(*results));
   NT_TEST(results != NULL);
@@ -1596,9 +1613,9 @@ static int do_client2(int ss, const char* hostport, int local)
   printf("#\tsize\tmean\tmin\tmedian\tmax\t%%ile\tstddev\titer\n");
   fflush(stdout);
 
-  do_zc_init(write_fd);
+  do_zc_init(write_handle.fd);
 
-  if( fd_type & FDTF_STREAM ) {
+  if( handle_type & HTF_STREAM ) {
     if( cfg_minmsg == 0 )
       cfg_minmsg = 1;
     if( cfg_maxmsg == 0 )
@@ -1621,7 +1638,7 @@ static int do_client2(int ss, const char* hostport, int local)
   }
 
   for( i = 0; i < msg_sizes.len; ++i )
-    do_test(ss, read_fd, write_fd, msg_sizes.list[i], results);
+    do_test(ss, read_handle, write_handle, msg_sizes.list[i], results);
 
   /* Tell server side to exit. */
   sfnt_sock_put_int(ss, 0);
