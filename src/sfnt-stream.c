@@ -478,11 +478,13 @@ static ssize_t epoll_recv(int fd, void* buf, size_t len, int flags)
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   struct epoll_event e;
   int rc, got = 0, all = flags & MSG_WAITALL;
+  union handle h = { .fd = epoll_fd };
+
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
   do {
-    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, mux_flags);
+    rc = sfnt_epolltype_wait(h, HT_EPOLL, &e, 1, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
       if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
@@ -506,13 +508,15 @@ static ssize_t epoll_mod_recv(int fd, void* buf, size_t len, int flags)
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   struct epoll_event e;
   int rc, got = 0, all = flags & MSG_WAITALL;
+  union handle h = { .fd = epoll_fd };
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
+
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
   e.events = EPOLLIN;
   NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &e));
   do {
-    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, mux_flags);
+    rc = sfnt_epolltype_wait(h, HT_EPOLL, &e, 1, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
       if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
@@ -538,13 +542,15 @@ static ssize_t epoll_adddel_recv(int fd, void* buf, size_t len, int flags)
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   struct epoll_event e;
   int rc, got = 0, all = flags & MSG_WAITALL;
+  union handle h = { .fd = epoll_fd };
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
+
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
   e.events = EPOLLIN;
   NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &e));
   do {
-    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, mux_flags);
+    rc = sfnt_epolltype_wait(h, HT_EPOLL, &e, 1, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
       if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )

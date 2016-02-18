@@ -11,6 +11,9 @@
 
 #include "sfnettest.h"
 
+#ifdef USE_ZF
+#include <zf/muxer.h>
+#endif
 
 #define return_now(rc, flags, timeout)                                  \
   ( (rc) > 0 ||                                                         \
@@ -85,15 +88,22 @@ int sfnt_poll(struct pollfd* fds, nfds_t nfds, int timeout_ms,
 
 
 #if NT_HAVE_EPOLL
-int sfnt_epoll_wait(int epfd, struct epoll_event* events, int maxevents,
-		    int timeout_ms, const struct sfnt_tsc_params* tscp,
-		    enum sfnt_mux_flags flags)
+int sfnt_epolltype_wait(const union handle h, const enum handle_type h_type,
+                        struct epoll_event* events, int maxevents,
+		        int timeout_ms, const struct sfnt_tsc_params* tscp,
+		        enum sfnt_mux_flags flags)
 {
   int use_timeout_ms = (flags & NT_MUX_SPIN) ? 0 : timeout_ms;
   uint64_t tsc_now, tsc_timeout;
   int rc;
 
-  rc = epoll_wait(epfd, events, maxevents, use_timeout_ms);
+#if USE_ZF
+  if( h_type & HTF_ZF )
+    rc = zf_muxer_wait(h.zf_mux, events, maxevents, use_timeout_ms);
+  else
+#endif
+    rc = epoll_wait(h.fd, events, maxevents, use_timeout_ms);
+
   if( return_now(rc, flags, timeout_ms) )
     return rc;
 
@@ -105,7 +115,13 @@ int sfnt_epoll_wait(int epfd, struct epoll_event* events, int maxevents,
   tsc_timeout = calc_tsc_timeout(tscp, timeout_ms);
 
   while( 1 ) {
-    rc = epoll_wait(epfd, events, maxevents, use_timeout_ms);
+#if USE_ZF
+    if( h_type & HTF_ZF )
+      rc = zf_muxer_wait(h.zf_mux, events, maxevents, use_timeout_ms);
+    else
+#endif
+      rc = epoll_wait(h.fd, events, maxevents, use_timeout_ms);
+
     if( return_now(rc, flags, timeout_ms) )
       break;
     if( rc < 0 ) {  /* EINTR && NT_MUX_CONTINUE_ON_EINTR */

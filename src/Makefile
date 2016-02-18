@@ -91,6 +91,7 @@ LINK_ONLOAD_ZF	:= \
 	-Wl,-rpath,$(ONLOAD_TREE)/build/$(shell mmaketool --userbuild)/lib/zf
 sfnt-pingpong.o: CPPFLAGS += -I$(ONLOAD_TREE)/src/include
 sfnt-stream.o:   CPPFLAGS += -I$(ONLOAD_TREE)/src/include
+sfnt_mux.o:      CPPFLAGS += -I$(ONLOAD_TREE)/src/include
 sfnt-pingpong: LIBS := $(LINK_ONLOAD_EXT) $(LINK_ONLOAD_ZF) $(LIBS)
 sfnt-stream:   LIBS := $(LINK_ONLOAD_EXT) $(LINK_ONLOAD_ZF) $(LIBS)
 endif

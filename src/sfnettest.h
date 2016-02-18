@@ -189,6 +189,40 @@ do {                                                        \
   }                                                         \
 } while(0)
 
+
+/**********************************************************************
+ * Common descriptor structure
+ */
+struct zfur;
+struct zfut;
+union handle {
+  int fd;
+  struct zfur* ur;
+  struct zfut* ut;
+  struct zf_muxer_set* zf_mux;
+};
+
+
+enum handle_type_flags {
+  HTF_SOCKET = 0x100,
+  HTF_LOCAL  = 0x200,
+  HTF_STREAM = 0x400,
+  HTF_ZF     = 0x800,
+  HTF_MUX    = 0x1000,
+};
+
+
+enum handle_type {
+  HT_TCP     = 0 | HTF_SOCKET | 0         | HTF_STREAM | 0      | 0,
+  HT_UDP     = 1 | HTF_SOCKET | 0         | 0          | 0      | 0,
+  HT_PIPE    = 2 | 0          | HTF_LOCAL | HTF_STREAM | 0      | 0,
+  HT_UNIX_S  = 3 | HTF_SOCKET | HTF_LOCAL | HTF_STREAM | 0      | 0,
+  HT_UNIX_D  = 4 | HTF_SOCKET | HTF_LOCAL | 0          | 0      | 0,
+  HT_ZF_UDP  = 5 | 0          | 0         | 0          | HTF_ZF | 0,
+  HT_ZF_MUX  = 7 | 0          | 0         | 0          | HTF_ZF | HTF_MUX,
+  HT_EPOLL   = 8 | 0          | 0         | 0          | 0      | HTF_MUX,
+};
+
 /**********************************************************************
  * Information about the test environment.
  */
@@ -287,13 +321,14 @@ extern int sfnt_poll(struct pollfd* fds, nfds_t nfds,
 #endif
 
 #if NT_HAVE_EPOLL
-/* Calls epoll_wait().  Adds option to spin and option to continue to wait
- * if interrupted by signal.
+/* Calls epoll_wait() or zf_muxer_wait.
+ * Adds option to spin and option to continue to wait if interrupted by signal.
  */
-extern int sfnt_epoll_wait(int epfd, struct epoll_event* events,
-			   int maxevents, int timeout,
-			   const struct sfnt_tsc_params* params,
-			   enum sfnt_mux_flags flags);
+extern int sfnt_epolltype_wait(union handle h, enum handle_type h_type,
+                               struct epoll_event* events,
+                               int maxevents, int timeout,
+                               const struct sfnt_tsc_params* params,
+                               enum sfnt_mux_flags flags);
 #endif
 
 /**********************************************************************

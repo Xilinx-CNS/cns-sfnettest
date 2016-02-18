@@ -18,6 +18,7 @@
 #include <zf/zf.h>
 #include <zf/zf_udp.h>
 #include <zf/zf_reactor.h>
+#include <zf/muxer.h>
 #endif
 
 static int         cfg_port = 2048;
@@ -82,7 +83,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1S("sizes",       cfg_sizes,       "message sizes (list or range)"       ),
   CL2F("connect",     cfg_connect,     "connect() UDP socket"                ),
   CL2F("spin",        cfg_spin,        "receive side should spin"            ),
-  CL2S("muxer",       cfg_muxer,       "select, poll, epoll or none"         ),
+  CL2S("muxer",       cfg_muxer,       "select, poll, epoll, zf or none"     ),
   CL1F("rtt",         cfg_rtt,         "report round-trip-time"              ),
   CL1S("raw",         cfg_raw,         "dump raw results to files"           ),
   CL1D("percentile",  cfg_percentile,  "percentile"                          ),
@@ -121,12 +122,6 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
 
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
-union handle {
-  int fd;
-  struct zfur* ur;
-  struct zfut* ut;
-};
-
 
 struct stats {
   int mean;
@@ -137,23 +132,6 @@ struct stats {
   int stddev;
 };
 
-
-enum handle_type_flags {
-  HTF_SOCKET = 0x100,
-  HTF_LOCAL  = 0x200,
-  HTF_STREAM = 0x400,
-  HTF_ZF     = 0x800,
-};
-
-
-enum handle_type {
-  HT_TCP     = 0 | HTF_SOCKET | 0         | HTF_STREAM | 0,
-  HT_UDP     = 1 | HTF_SOCKET | 0         | 0          | 0,
-  HT_PIPE    = 2 | 0          | HTF_LOCAL | HTF_STREAM | 0,
-  HT_UNIX_S  = 3 | HTF_SOCKET | HTF_LOCAL | HTF_STREAM | 0,
-  HT_UNIX_D  = 4 | HTF_SOCKET | HTF_LOCAL | 0          | 0,
-  HT_ZF_UDP  = 5 | 0          | 0         | 0          | HTF_ZF,
-};
 
 struct user_info {
   int size;
@@ -203,6 +181,7 @@ static int                 epoll_fd;
 #endif
 
 #ifdef USE_ZF
+static struct zf_muxer_set* zf_mux;
 static struct zf_attr* zattr;
 static struct zf_stack* ztack;
 #endif
@@ -298,7 +277,8 @@ static ssize_t rfn_zfur_recv(union handle h, void* buf, size_t len, int flags)
   int i;
 
   do {
-    while(zf_reactor_perform(ztack) == 0);
+    if( !zf_mux )
+      while(zf_reactor_perform(ztack) == 0);
 
     rc = zfur_zc_recv(h.ur, &rd.zcr, flags);
     if( rc < 0 )
@@ -679,16 +659,29 @@ static void epoll_add(int fd)
 }
 
 
-static ssize_t epoll_recv(union handle h, void* buf, size_t len, int flags)
+static ssize_t epolltype_recv(union handle h, void* buf, size_t len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   struct epoll_event e;
   int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
+  union handle mh;
+  enum handle_type mh_type;
+  if( handle_type & HTF_ZF ) {
+#ifdef USE_ZF
+    mh.zf_mux = zf_mux;
+    mh_type = HT_ZF_MUX;
+#endif
+  }
+  else {
+    mh.fd = epoll_fd;
+    mh_type = HT_EPOLL;
+  }
+
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
   do {
-    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, mux_flags);
+    rc = sfnt_epolltype_wait(mh, mh_type, &e, 1, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
       if( (rc = do_recv(h, (char*) buf + got, len - got, flags)) > 0 )
@@ -712,12 +705,14 @@ static ssize_t epoll_mod_recv(union handle h, void* buf, size_t len, int flags)
   struct epoll_event e;
   int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
+  union handle mh = { .fd = epoll_fd };
+
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
   e.events = EPOLLIN;
   NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, h.fd, &e));
   do {
-    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, mux_flags);
+    rc = sfnt_epolltype_wait(mh, HT_EPOLL, &e, 1, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
       if( (rc = do_recv(h, (char*) buf + got, len - got, flags)) > 0 )
@@ -744,12 +739,15 @@ static ssize_t epoll_adddel_recv(union handle h, void* buf, size_t len,
   struct epoll_event e;
   int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
+  union handle mh = { .fd = epoll_fd };
+
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
   e.events = EPOLLIN;
   NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, h.fd, &e));
   do {
-    rc = sfnt_epoll_wait(epoll_fd, &e, 1, timeout_ms, &tsc, mux_flags);
+    rc = sfnt_epolltype_wait(mh, HT_EPOLL, &e, 1, timeout_ms, &tsc,
+                             mux_flags);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
       if( (rc = do_recv(h, (char*) buf + got, len - got, flags)) > 0 )
@@ -768,6 +766,15 @@ static ssize_t epoll_adddel_recv(union handle h, void* buf, size_t len,
   return got ? got : rc;
 }
 
+#endif
+
+/**********************************************************************/
+
+#ifdef USE_ZF
+static void zf_mux_init(void)
+{
+  NT_TRY(zf_muxer_alloc(ztack, &zf_mux));
+}
 #endif
 
 /**********************************************************************/
@@ -939,6 +946,14 @@ static void do_init(void)
       mux_recv = cfg_spin[0] ? spin_recv : do_recv;
       mux_add = noop_add;
     }
+    else if( ! strcasecmp(muxer, "zf") ) {
+      mux_recv = epolltype_recv;
+      /* mux_add is used for adding additional fds to a mux set - adding to
+       * a mux set for zockets is handled explicitly
+       */
+      mux_add = noop_add;
+      zf_mux_init();
+    }
     else {
       sfnt_fail_usage("ERROR: muxer '%s' unknown, or invalid with zockets",
                       muxer);
@@ -969,7 +984,7 @@ static void do_init(void)
 #endif
 #if NT_HAVE_EPOLL
     else if( ! strcasecmp(muxer, "epoll") ) {
-      mux_recv = epoll_recv;
+      mux_recv = epolltype_recv;
       mux_add = epoll_add;
       epoll_init();
     }
@@ -1042,6 +1057,37 @@ static void do_pong(union handle read_h, union handle write_h, int sz)
     NT_TESTi3(rc, ==, sz);
   }
 }
+
+
+#ifdef USE_ZF
+static void add_zocket(union handle h)
+{
+  /* In future we could add the options to put additional zocket types in
+   * the mux set, but for now we only add the test zocket.
+   */
+  if( (cfg_n_pipe[0] > 0) || (cfg_n_unixd[0] > 0) || (cfg_n_udp[0] > 0) ||
+      (cfg_n_tcpc[0] > 0) || (cfg_n_tcpl[0] > 0) ) {
+    sfnt_err("ERROR: Cannot mix normal fds with zockets for muxing\n");
+    sfnt_fail_setup();
+  }
+
+  if( zf_mux ) {
+    struct epoll_event e;
+    e.events = EPOLLIN;
+
+    struct zf_waitable* w;
+    if( handle_type == HT_ZF_UDP ) {
+      w = zfur_to_waitable(h.ur);
+    }
+    else {
+      sfnt_err("ERROR: Only UDP zockets supported for zf muxing currently\n");
+      sfnt_fail_setup();
+    }
+
+    NT_TRY(zf_muxer_add(zf_mux, w, &e));
+  }
+}
+#endif
 
 
 static void add_fds(int us)
@@ -1403,7 +1449,14 @@ static int do_server2(int ss)
   }
   if( handle_type & HTF_SOCKET )
     set_sock_timeouts(read_handle.fd);
-  add_fds(read_handle.fd);
+
+#ifdef USE_ZF
+  if( handle_type & HTF_ZF )
+    add_zocket(read_handle);
+  else
+#endif
+    add_fds(read_handle.fd);
+
   do_zc_init(write_handle.fd);
 
   while( 1 ) {
@@ -1758,7 +1811,14 @@ static int do_client2(int ss, const char* hostport, int local)
   }
   if( handle_type & HTF_SOCKET )
     set_sock_timeouts(read_h.fd);
-  add_fds(read_h.fd);
+
+#ifdef USE_ZF
+  /* For zf we can't mux between normal fds and zockets */
+  if( handle_type & HTF_ZF )
+    add_zocket(read_h);
+  else
+#endif
+    add_fds(read_h.fd);
 
   results = malloc(cfg_maxiter * sizeof(*results));
   NT_TEST(results != NULL);
