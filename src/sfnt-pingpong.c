@@ -14,6 +14,11 @@
 #include <onload/extensions.h>
 #include <onload/extensions_zc.h>
 
+#ifdef USE_ZF
+#include <zf/zf.h>
+#include <zf/zf_udp.h>
+#include <zf/zf_reactor.h>
+#endif
 
 static int         cfg_port = 2048;
 static int         cfg_connect[2];
@@ -118,6 +123,8 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
 
 union handle {
   int fd;
+  struct zfur* ur;
+  struct zfut* ut;
 };
 
 
@@ -135,15 +142,17 @@ enum handle_type_flags {
   HTF_SOCKET = 0x100,
   HTF_LOCAL  = 0x200,
   HTF_STREAM = 0x400,
+  HTF_ZF     = 0x800,
 };
 
 
 enum handle_type {
-  HT_TCP     = 0 | HTF_SOCKET | 0         | HTF_STREAM,
-  HT_UDP     = 1 | HTF_SOCKET | 0         | 0,
-  HT_PIPE    = 2 | 0          | HTF_LOCAL | HTF_STREAM,
-  HT_UNIX_S  = 3 | HTF_SOCKET | HTF_LOCAL | HTF_STREAM,
-  HT_UNIX_D  = 4 | HTF_SOCKET | HTF_LOCAL | 0,
+  HT_TCP     = 0 | HTF_SOCKET | 0         | HTF_STREAM | 0,
+  HT_UDP     = 1 | HTF_SOCKET | 0         | 0          | 0,
+  HT_PIPE    = 2 | 0          | HTF_LOCAL | HTF_STREAM | 0,
+  HT_UNIX_S  = 3 | HTF_SOCKET | HTF_LOCAL | HTF_STREAM | 0,
+  HT_UNIX_D  = 4 | HTF_SOCKET | HTF_LOCAL | 0          | 0,
+  HT_ZF_UDP  = 5 | 0          | 0         | 0          | HTF_ZF,
 };
 
 struct user_info {
@@ -191,6 +200,11 @@ static int                 pfds_n;
 
 #if NT_HAVE_EPOLL
 static int                 epoll_fd;
+#endif
+
+#ifdef USE_ZF
+static struct zf_attr* zattr;
+static struct zf_stack* ztack;
 #endif
 
 static ssize_t (*do_recv)(union handle, void*, size_t, int);
@@ -268,6 +282,51 @@ static ssize_t sfn_write(union handle h, const void* buf, size_t len, int flags)
 {
   return write(h.fd, buf, len);
 }
+
+
+#ifdef USE_ZF
+static ssize_t rfn_zfur_recv(union handle h, void* buf, size_t len, int flags)
+{
+  struct {
+    struct zfur_msg zcr;
+    struct iovec iov[6];
+  } rd;
+  rd.zcr.iovcnt = 6;
+
+  int rc, got = 0, all = flags & MSG_WAITALL;
+  flags = 0;
+  int i;
+
+  do {
+    while(zf_reactor_perform(ztack) == 0);
+
+    rc = zfur_zc_recv(h.ur, &rd.zcr, flags);
+    if( rc < 0 )
+      goto out;
+
+    for(i = 0; i < rd.zcr.iovcnt; i++)
+      got += rd.zcr.iov[i].iov_len;
+
+    zfur_zc_recv_done(h.ur, &rd.zcr);
+  } while( all && got < len );
+
+ out:
+  return got ? got : rc;
+}
+
+
+static ssize_t sfn_zfut_send(union handle h, const void* buf, size_t len,
+                             int flags)
+{
+  const struct iovec siov = {
+    .iov_base = (void*)buf,
+    .iov_len = len
+  };
+
+  int rc = zfut_send(h.ut, &siov, 1, 0);
+  return rc == 0 ? len : rc;
+}
+#endif
 
 /**********************************************************************/
 static void handle_msg(void* iov_base, int len)
@@ -785,6 +844,16 @@ static void do_zc_init(int write_fd)
 }
 
 
+#ifdef USE_ZF
+static void do_zf_init(void)
+{
+  NT_TRY(zf_init());
+  NT_TRY(zf_attr_alloc(&zattr));
+  NT_TRY(zf_stack_alloc(zattr, &ztack));
+}
+#endif
+
+
 static void do_init(void)
 {
   const char* muxer = cfg_muxer[0];
@@ -835,48 +904,89 @@ static void do_init(void)
       do_send = do_send_tmpl;
     }
   }
+#ifdef USE_ZF
+  else if( handle_type & HTF_ZF ) {
+    if( cfg_tmpl_send[0] != -1 ) {
+      sfnt_err("ERROR: templated sends not supported for zockets\n");
+      sfnt_fail_setup();
+    }
+    if( cfg_warm[0] != 0 ) {
+      sfnt_err("ERROR: MSG_WARM not supported for zockets\n");
+      sfnt_fail_setup();
+    }
+    if( cfg_zc[0] ) {
+      sfnt_err("ERROR: Onload zero copy not supported for zockets\n");
+      sfnt_fail_setup();
+    }
+
+    do_recv = rfn_zfur_recv;
+    do_send = sfn_zfut_send;
+
+    do_zf_init();
+  }
+#endif
   else {
     do_recv = rfn_read;
     do_send = sfn_write;
   }
 
-  if( muxer == NULL || ! strcmp(muxer, "") || ! strcasecmp(muxer, "none") ) {
-    if( cfg_warm[0] ) 
-      mux_recv = warm_recv;
-    else
+  /* If we're using the direct zockets API we must use an appropriate muxer
+   * type, so check mux separately in that case.
+   */
+  if( handle_type & HTF_ZF ) {
+#ifdef USE_ZF
+    if( muxer == NULL || ! strcmp(muxer, "") || ! strcasecmp(muxer, "none") ) {
       mux_recv = cfg_spin[0] ? spin_recv : do_recv;
-    mux_add = noop_add;
+      mux_add = noop_add;
+    }
+    else {
+      sfnt_fail_usage("ERROR: muxer '%s' unknown, or invalid with zockets",
+                      muxer);
+    }
+#else
+    /* Shouldn't be using a zocket if we're not built with zf */
+    NT_ASSERT(0);
+#endif
   }
-  else if( ! strcasecmp(muxer, "select") ) {
-    mux_recv = select_recv;
-    mux_add = select_add;
-    select_init();
-  }
+  else {
+    if( muxer == NULL || ! strcmp(muxer, "") || ! strcasecmp(muxer, "none") ) {
+      if( cfg_warm[0] ) 
+        mux_recv = warm_recv;
+      else
+        mux_recv = cfg_spin[0] ? spin_recv : do_recv;
+      mux_add = noop_add;
+    }
+    else if( ! strcasecmp(muxer, "select") ) {
+      mux_recv = select_recv;
+      mux_add = select_add;
+      select_init();
+    }
 #if NT_HAVE_POLL
-  else if( ! strcasecmp(muxer, "poll") ) {
-    mux_recv = poll_recv;
-    mux_add = poll_add;
-  }
+    else if( ! strcasecmp(muxer, "poll") ) {
+      mux_recv = poll_recv;
+      mux_add = poll_add;
+    }
 #endif
 #if NT_HAVE_EPOLL
-  else if( ! strcasecmp(muxer, "epoll") ) {
-    mux_recv = epoll_recv;
-    mux_add = epoll_add;
-    epoll_init();
-  }
-  else if( ! strcasecmp(muxer, "epoll_mod") ) {
-    mux_recv = epoll_mod_recv;
-    mux_add = epoll_add;
-    epoll_init();
-  }
-  else if( ! strcasecmp(muxer, "epoll_adddel") ) {
-    mux_recv = epoll_adddel_recv;
-    mux_add = noop_add;
-    epoll_init();
-  }
+    else if( ! strcasecmp(muxer, "epoll") ) {
+      mux_recv = epoll_recv;
+      mux_add = epoll_add;
+      epoll_init();
+    }
+    else if( ! strcasecmp(muxer, "epoll_mod") ) {
+      mux_recv = epoll_mod_recv;
+      mux_add = epoll_add;
+      epoll_init();
+    }
+    else if( ! strcasecmp(muxer, "epoll_adddel") ) {
+      mux_recv = epoll_adddel_recv;
+      mux_add = noop_add;
+      epoll_init();
+    }
 #endif
-  else {
-    sfnt_fail_usage("ERROR: Unknown muxer");
+    else {
+      sfnt_fail_usage("ERROR: Unknown muxer");
+    }
   }
 }
 
@@ -919,8 +1029,12 @@ static void do_pong(union handle read_h, union handle write_h, int sz)
   zc_msg.msg_iov->iov_len = sz;
 
   for( i = 0; i < cfg_n_pings; ++i ) {
+#ifdef __sun__
     /* NB. Solaris doesn't block in UDP recv with 0 length buffer. */
     rc = mux_recv(read_h, ppbuf, sz ? sz : 1, MSG_WAITALL);
+#else
+    rc = mux_recv(read_h, ppbuf, sz, MSG_WAITALL);
+#endif
     NT_TESTi3(rc, ==, sz);
   }
   for( i = 0; i < cfg_n_pongs; ++i ) {
@@ -1062,6 +1176,27 @@ static void server_recv_opts(int ss)
   cfg_warm[0] = sfnt_sock_get_int(ss);
   cfg_tmpl_send[0] = sfnt_sock_get_int(ss);
 }
+
+
+#ifdef USE_ZF
+/* FIXME This is a temporary hack until we have cplane and port selection */
+static void zf_udp_setup_addrs(int ss)
+{
+  socklen_t my_sa_len;
+  my_sa_len = sizeof(my_sa);
+
+  /* Use the same local interface as the setup socket */
+  NT_TRY(getsockname(ss, (struct sockaddr*) &my_sa, &my_sa_len));
+  my_sa.sin_port = 11111;
+
+  /* Tell client our address, and get their's. */
+  sfnt_sock_put_sockaddr_in(ss, &my_sa);
+  sfnt_sock_get_sockaddr_in(ss, &peer_sa);
+
+  to_sa = (struct sockaddr*) &peer_sa;
+  to_sa_len = sizeof(peer_sa);
+}
+#endif
 
 
 static void udp_bind_sock(int us, int ss)
@@ -1255,6 +1390,16 @@ static int do_server2(int ss)
   case HT_UNIX_D:
     read_handle.fd = write_handle.fd = the_fds[1];
     break;
+#ifdef USE_ZF
+  case HT_ZF_UDP:
+    zf_udp_setup_addrs(ss);
+    NT_TRY(zfur_alloc(&read_handle.ur, ztack, zattr));
+    NT_TRY(zfur_addr_bind(read_handle.ur, &my_sa, &peer_sa, 0));
+    NT_TRY(zfut_alloc(&write_handle.ut, ztack, &my_sa, &peer_sa, 0, zattr));
+    break;
+#endif
+  default:
+    NT_ASSERT(0);
   }
   if( handle_type & HTF_SOCKET )
     set_sock_timeouts(read_handle.fd);
@@ -1471,6 +1616,8 @@ static int do_client(int argc, char* argv[])
     handle_type = HT_UNIX_S;
   else if( ! strcasecmp(handle_type_s, "unix_datagram") )
     handle_type = HT_UNIX_D;
+  else if( ! strcasecmp(handle_type_s, "zf_udp") )
+    handle_type = HT_ZF_UDP;
   else
     sfnt_fail_usage("unknown handle_type '%s'", handle_type_s);
 
@@ -1528,7 +1675,7 @@ static int do_client(int argc, char* argv[])
 static int do_client2(int ss, const char* hostport, int local)
 {
   struct sfnt_ilist msg_sizes;
-  union handle read_handle, write_handle;
+  union handle read_h, write_h;
   char* server_ld_preload;
   int msg_size;
   int* results;
@@ -1573,35 +1720,45 @@ static int do_client2(int ss, const char* hostport, int local)
     if( (p = strchr(host, ':')) != NULL )
       *p = '\0';
     int port = sfnt_sock_get_int(ss);
-    NT_TRY2(read_handle.fd, socket(PF_INET, SOCK_STREAM, 0));
+    NT_TRY2(read_h.fd, socket(PF_INET, SOCK_STREAM, 0));
     if( cfg_nodelay[0] )
-      NT_TRY(setsockopt(read_handle.fd, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
-    NT_TRY(sfnt_connect(read_handle.fd, host, NULL, port));
-    write_handle.fd = read_handle.fd;
+      NT_TRY(setsockopt(read_h.fd, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
+    NT_TRY(sfnt_connect(read_h.fd, host, NULL, port));
+    write_h.fd = read_h.fd;
     break;
   }
   case HT_UDP:
-    NT_TRY2(read_handle.fd, socket(PF_INET, SOCK_DGRAM, 0));
-    udp_bind_sock(read_handle.fd, ss);
-    udp_exchange_addrs(read_handle.fd, ss);
-    write_handle.fd = read_handle.fd;
+    NT_TRY2(read_h.fd, socket(PF_INET, SOCK_DGRAM, 0));
+    udp_bind_sock(read_h.fd, ss);
+    udp_exchange_addrs(read_h.fd, ss);
+    write_h.fd = read_h.fd;
     break;
   case HT_PIPE:
-    read_handle.fd = the_fds[0];
-    write_handle.fd = the_fds[3];
+    read_h.fd = the_fds[0];
+    write_h.fd = the_fds[3];
     if( cfg_spin[0] ) {
-      sfnt_fd_set_nonblocking(read_handle.fd);
-      sfnt_fd_set_nonblocking(write_handle.fd);
+      sfnt_fd_set_nonblocking(read_h.fd);
+      sfnt_fd_set_nonblocking(write_h.fd);
     }
     break;
   case HT_UNIX_S:
   case HT_UNIX_D:
-    read_handle.fd = write_handle.fd = the_fds[0];
+    read_h.fd = write_h.fd = the_fds[0];
     break;
+#ifdef USE_ZF
+  case HT_ZF_UDP:
+    zf_udp_setup_addrs(ss);
+    NT_TRY(zfur_alloc(&read_h.ur, ztack, zattr));
+    NT_TRY(zfur_addr_bind(read_h.ur, &my_sa, &peer_sa, 0));
+    NT_TRY(zfut_alloc(&write_h.ut, ztack, &my_sa, &peer_sa, 0, zattr));
+    break;
+#endif
+  default:
+    NT_ASSERT(0);
   }
   if( handle_type & HTF_SOCKET )
-    set_sock_timeouts(read_handle.fd);
-  add_fds(read_handle.fd);
+    set_sock_timeouts(read_h.fd);
+  add_fds(read_h.fd);
 
   results = malloc(cfg_maxiter * sizeof(*results));
   NT_TEST(results != NULL);
@@ -1613,7 +1770,7 @@ static int do_client2(int ss, const char* hostport, int local)
   printf("#\tsize\tmean\tmin\tmedian\tmax\t%%ile\tstddev\titer\n");
   fflush(stdout);
 
-  do_zc_init(write_handle.fd);
+  do_zc_init(write_h.fd);
 
   if( handle_type & HTF_STREAM ) {
     if( cfg_minmsg == 0 )
@@ -1638,7 +1795,7 @@ static int do_client2(int ss, const char* hostport, int local)
   }
 
   for( i = 0; i < msg_sizes.len; ++i )
-    do_test(ss, read_handle, write_handle, msg_sizes.list[i], results);
+    do_test(ss, read_h, write_h, msg_sizes.list[i], results);
 
   /* Tell server side to exit. */
   sfnt_sock_put_int(ss, 0);

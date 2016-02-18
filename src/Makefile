@@ -54,6 +54,9 @@ endif
 ifdef OS_LINUX
 LIBS += -lonload_ext -ldl
 endif
+ifdef USE_ZF
+LIBS += -lonload_zf
+endif
 sfnt-stream: LIBS += -lpthread
 $(APPS): libsfnettest.a
 
@@ -75,14 +78,21 @@ endif
 endif
 CPPFLAGS	+= -DSFNT_VERSION='"$(SFNT_VERSION)"'
 CPPFLAGS	+= -DSFNT_SRC_CSUM='"$(SFNT_SRC_CSUM)"'
+ifdef USE_ZF
+CPPFLAGS	+= -DUSE_ZF
+endif
 
 ifdef ONLOAD_TREE
-LINK_ONLOAD_EXT	:= -L$(ONLOAD_TREE)/build/gnu_x86_64/lib/onload_ext \
-		-Wl,-rpath,$(ONLOAD_TREE)/build/gnu_x86_64/lib/onload_ext
+LINK_ONLOAD_EXT	:= \
+	-L$(ONLOAD_TREE)/build/$(shell mmaketool --userbuild)/lib/onload_ext \
+	-Wl,-rpath,$(ONLOAD_TREE)/build/$(shell mmaketool --userbuild)/lib/onload_ext
+LINK_ONLOAD_ZF	:= \
+	-L$(ONLOAD_TREE)/build/$(shell mmaketool --userbuild)/lib/zf \
+	-Wl,-rpath,$(ONLOAD_TREE)/build/$(shell mmaketool --userbuild)/lib/zf
 sfnt-pingpong.o: CPPFLAGS += -I$(ONLOAD_TREE)/src/include
 sfnt-stream.o:   CPPFLAGS += -I$(ONLOAD_TREE)/src/include
-sfnt-pingpong: LIBS := $(LINK_ONLOAD_EXT) $(LIBS)
-sfnt-stream:   LIBS := $(LINK_ONLOAD_EXT) $(LIBS)
+sfnt-pingpong: LIBS := $(LINK_ONLOAD_EXT) $(LINK_ONLOAD_ZF) $(LIBS)
+sfnt-stream:   LIBS := $(LINK_ONLOAD_EXT) $(LINK_ONLOAD_ZF) $(LIBS)
 endif
 
 # Define MSG_WAITALL_HACK to avoid using MSG_WAITALL, which is not
