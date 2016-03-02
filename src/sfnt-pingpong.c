@@ -17,6 +17,7 @@
 #ifdef USE_ZF
 #include <zf/zf.h>
 #include <zf/zf_udp.h>
+#include <zf/zf_tcp.h>
 #include <zf/zf_reactor.h>
 #include <zf/muxer.h>
 #endif
@@ -304,6 +305,65 @@ static ssize_t sfn_zfut_send(union handle h, const void* buf, size_t len,
   };
 
   int rc = zfut_send(h.ut, &siov, 1, 0);
+  return rc == 0 ? len : rc;
+}
+
+
+static ssize_t rfn_zft_recv(union handle h, void* buf, size_t len, int flags)
+{
+  struct {
+    struct zft_msg zcr;
+    struct iovec iov[6];
+  } rd;
+  int in_iovcnt = sizeof(rd.iov)/sizeof(rd.iov[0]);
+
+  int got = 0, all = flags & MSG_WAITALL;
+  flags = 0;
+  int i;
+ 
+  do {
+    rd.zcr.iovcnt = in_iovcnt;
+
+    if( !zf_mux )
+      while(zf_reactor_perform(ztack) == 0);
+
+    zft_zc_recv(h.t, &rd.zcr, flags);
+
+    for(i = 0; i < rd.zcr.iovcnt; i++)
+      got += rd.zcr.iov[i].iov_len;
+
+    if( rd.zcr.iovcnt )
+      zft_zc_recv_done(h.t, &rd.zcr);
+
+    rd.zcr.iovcnt = in_iovcnt;
+
+    /* zf_reactor perform is edge triggered so we need to ensure we've fully
+     * drained our recv queue before spinning on it.  That means we need to
+     * make 2 calls to zft_zc_recv as if we have data queued over the point at
+     * which the ring wraps it will be split into batches.
+     */
+    zft_zc_recv(h.t, &rd.zcr, flags);
+
+    for(i = 0; i < rd.zcr.iovcnt; i++)
+      got += rd.zcr.iov[i].iov_len;
+
+    if( rd.zcr.iovcnt )
+      zft_zc_recv_done(h.t, &rd.zcr);
+  } while( all && got < len );
+
+  return got;
+}
+
+
+static ssize_t sfn_zft_send(union handle h, const void* buf, size_t len,
+                            int flags)
+{
+  const struct iovec siov = {
+    .iov_base = (void*)buf,
+    .iov_len = len
+  };
+
+  int rc = zft_send(h.t, &siov, 1, 0);
   return rc == 0 ? len : rc;
 }
 #endif
@@ -926,8 +986,15 @@ static void do_init(void)
       sfnt_fail_setup();
     }
 
-    do_recv = rfn_zfur_recv;
-    do_send = sfn_zfut_send;
+    if( handle_type == HT_ZF_UDP ) {
+      do_recv = rfn_zfur_recv;
+      do_send = sfn_zfut_send;
+    }
+    else {
+      NT_ASSERT(handle_type == HT_ZF_TCP);
+      do_recv = rfn_zft_recv;
+      do_send = sfn_zft_send;
+    }
 
     do_zf_init();
   }
@@ -1078,6 +1145,9 @@ static void add_zocket(union handle h)
     struct zf_waitable* w;
     if( handle_type == HT_ZF_UDP ) {
       w = zfur_to_waitable(h.ur);
+    }
+    else if( handle_type == HT_ZF_TCP ) {
+      w = zft_to_waitable(h.t);
     }
     else {
       sfnt_err("ERROR: Only UDP zockets supported for zf muxing currently\n");
@@ -1241,6 +1311,64 @@ static void zf_udp_setup_addrs(int ss)
 
   to_sa = (struct sockaddr*) &peer_sa;
   to_sa_len = sizeof(peer_sa);
+}
+
+
+static void zf_tcp_accept(int ss, struct zft** zft_out)
+{
+  /* Use the same local interface as the setup socket */
+  struct sockaddr_in sa;
+  socklen_t sa_len = sizeof(sa);
+
+  NT_TRY(getsockname(ss, (struct sockaddr*) &sa, &sa_len));
+  sa.sin_port = 11111;
+
+  struct zftl* listener;
+  NT_TRY(zftl_listen(ztack, &sa, zattr, &listener));
+
+  sfnt_sock_put_int(ss, ntohs(sa.sin_port));
+
+  while( zftl_accept(listener, zft_out) == -EAGAIN )
+    while(zf_reactor_perform(ztack) == 0);
+
+  NT_TRY(zftl_shutdown(listener));
+  NT_TRY(zftl_free(listener));
+}
+
+
+static int zf_tcp_connect(int ss, struct zft_handle* th,
+                          const char* host_or_hostport, int port_i_or_neg,
+                          struct zft** t_out)
+{
+  struct addrinfo* ai;
+  int rc;
+
+  if( (rc = sfnt_getaddrinfo(host_or_hostport, NULL, port_i_or_neg, &ai)) != 0 )
+    return rc;
+
+  /* Use the same local interface as the setup socket */
+  struct sockaddr_in sa;
+  socklen_t sa_len = sizeof(sa);
+  NT_TRY(getsockname(ss, (struct sockaddr*) &sa, &sa_len));
+  sa.sin_port = 11111;
+
+  NT_TRY(zft_addr_bind(th, &sa));
+  NT_TRY(zft_connect(th, (const struct sockaddr_in*)ai->ai_addr, t_out));
+
+  /* Now wait for the connect to complete */
+  struct epoll_event event = { .events = EPOLLOUT };
+  struct zf_muxer_set* muxer;
+  NT_TRY(zf_muxer_alloc(ztack, &muxer));
+  NT_TRY(zf_muxer_add(muxer, zft_to_waitable(*t_out), &event));
+  do {
+    int events = zf_muxer_wait(muxer, &event, 1, -1);
+    NT_TEST(events > 0);
+  } while( ! (event.events & EPOLLOUT) );
+  zf_muxer_del(zft_to_waitable(*t_out));
+  zf_muxer_free(muxer);
+
+  freeaddrinfo(ai);
+  return rc;
 }
 #endif
 
@@ -1442,6 +1570,16 @@ static int do_server2(int ss)
     NT_TRY(zfur_alloc(&read_handle.ur, ztack, zattr));
     NT_TRY(zfur_addr_bind(read_handle.ur, &my_sa, &peer_sa, 0));
     NT_TRY(zfut_alloc(&write_handle.ut, ztack, &my_sa, &peer_sa, 0, zattr));
+    break;
+  case HT_ZF_TCP:
+    if( cfg_bindtodev[0] || cfg_nodelay[0] ) {
+      sfnt_err("ERROR: %s not supported with zockets",
+               cfg_bindtodev[0] ? "--bindtodev" : "--nodelay");
+      sfnt_fail_setup();
+    }
+
+    zf_tcp_accept(ss, &read_handle.t);
+    write_handle.t = read_handle.t;
     break;
 #endif
   default:
@@ -1671,6 +1809,8 @@ static int do_client(int argc, char* argv[])
     handle_type = HT_UNIX_D;
   else if( ! strcasecmp(handle_type_s, "zf_udp") )
     handle_type = HT_ZF_UDP;
+  else if( ! strcasecmp(handle_type_s, "zf_tcp") )
+    handle_type = HT_ZF_TCP;
   else
     sfnt_fail_usage("unknown handle_type '%s'", handle_type_s);
 
@@ -1805,6 +1945,26 @@ static int do_client2(int ss, const char* hostport, int local)
     NT_TRY(zfur_addr_bind(read_h.ur, &my_sa, &peer_sa, 0));
     NT_TRY(zfut_alloc(&write_h.ut, ztack, &my_sa, &peer_sa, 0, zattr));
     break;
+  case HT_ZF_TCP: {
+    if( cfg_bindtodev[0] || cfg_nodelay[0] ) {
+      sfnt_err("ERROR: %s not supported with zockets",
+               cfg_bindtodev[0] ? "--bindtodev" : "--nodelay");
+      sfnt_fail_setup();
+    }
+
+    char host[strlen(hostport) + 1];
+    char* p;
+    strcpy(host, hostport);
+    if( (p = strchr(host, ':')) != NULL )
+      *p = '\0';
+    int port = sfnt_sock_get_int(ss);
+
+    struct zft_handle* th;
+    NT_TRY(zft_alloc(ztack, zattr, &th));
+    NT_TRY(zf_tcp_connect(ss, th, host, port, &read_h.t));
+    write_h.t = read_h.t;
+    break;
+  }
 #endif
   default:
     NT_ASSERT(0);
@@ -1869,7 +2029,8 @@ int main(int argc, char* argv[])
   pid_t pid = 0;
   int rc = 0;
 
-  sfnt_app_getopt("[tcp|udp|pipe|unix_stream|unix_datagram [host[:port]]]",
+  sfnt_app_getopt("[tcp|udp|pipe|unix_stream|unix_datagram|zf_udp|zf_tcp "
+                  "[host[:port]]]",
                 &argc, argv, cfg_opts, N_CFG_OPTS);
   --argc; ++argv;
 

@@ -200,6 +200,7 @@ union handle {
   struct zfur* ur;
   struct zfut* ut;
   struct zf_muxer_set* zf_mux;
+  struct zft* t;
 };
 
 
@@ -219,6 +220,7 @@ enum handle_type {
   HT_UNIX_S  = 3 | HTF_SOCKET | HTF_LOCAL | HTF_STREAM | 0      | 0,
   HT_UNIX_D  = 4 | HTF_SOCKET | HTF_LOCAL | 0          | 0      | 0,
   HT_ZF_UDP  = 5 | 0          | 0         | 0          | HTF_ZF | 0,
+  HT_ZF_TCP  = 6 | 0          | 0         | HTF_STREAM | HTF_ZF | 0,
   HT_ZF_MUX  = 7 | 0          | 0         | 0          | HTF_ZF | HTF_MUX,
   HT_EPOLL   = 8 | 0          | 0         | 0          | 0      | HTF_MUX,
 };
