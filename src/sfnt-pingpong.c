@@ -226,7 +226,8 @@ ssize_t solaris_recv(union handle h, void *buf, size_t len, int flags)
   return rc;
 }
 #else
-inline ssize_t rfn_recv(union handle h, void* buf, size_t len, int flags)
+static inline ssize_t
+rfn_recv(union handle h, void* buf, size_t len, int flags)
 {
   return recv(h.fd, buf, len, flags);
 }
@@ -240,7 +241,8 @@ static ssize_t sfn_sendto(union handle h, const void* buf, size_t len,
 }
 
 
-inline ssize_t sfn_send(union handle h, const void* buf, size_t len, int flags)
+static inline ssize_t
+sfn_send(union handle h, const void* buf, size_t len, int flags)
 {
   return send(h.fd, buf, len, flags);
 }
