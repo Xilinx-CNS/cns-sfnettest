@@ -1354,7 +1354,7 @@ static int zf_tcp_connect(int ss, struct zft_handle* th,
   NT_TRY(getsockname(ss, (struct sockaddr*) &sa, &sa_len));
   sa.sin_port = 11111;
 
-  NT_TRY(zft_addr_bind(th, &sa));
+  NT_TRY(zft_addr_bind(th, &sa, 0));
   NT_TRY(zft_connect(th, (const struct sockaddr_in*)ai->ai_addr, t_out));
 
   /* Now wait for the connect to complete */
