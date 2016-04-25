@@ -55,7 +55,11 @@ ifdef OS_LINUX
 LIBS += -lonload_ext -ldl
 endif
 ifdef USE_ZF
-LIBS += -lonload_zf
+  ifdef USE_ZF_STATIC
+    LIBS += -lonload_zf_static -lpthread
+  else
+    LIBS += -lonload_zf
+  endif
 endif
 sfnt-stream: LIBS += -lpthread
 $(APPS): libsfnettest.a
