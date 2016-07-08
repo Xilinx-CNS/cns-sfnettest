@@ -1333,7 +1333,6 @@ static void zf_tcp_accept(int ss, struct zft** zft_out)
   while( zftl_accept(listener, zft_out) == -EAGAIN )
     while(zf_reactor_perform(ztack) == 0);
 
-  NT_TRY(zftl_shutdown(listener));
   NT_TRY(zftl_free(listener));
 }
 
