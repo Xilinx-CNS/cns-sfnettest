@@ -275,7 +275,7 @@ static ssize_t rfn_zfur_recv(union handle h, void* buf, size_t len, int flags)
   } rd;
   rd.zcr.iovcnt = 6;
 
-  int rc, got = 0, all = flags & MSG_WAITALL;
+  int got = 0, all = flags & MSG_WAITALL;
   flags = 0;
   int i;
 
@@ -283,18 +283,14 @@ static ssize_t rfn_zfur_recv(union handle h, void* buf, size_t len, int flags)
     if( !zf_mux )
       while(zf_reactor_perform(ztack) == 0);
 
-    rc = zfur_zc_recv(h.ur, &rd.zcr, flags);
-    if( rc < 0 )
-      goto out;
-
+    zfur_zc_recv(h.ur, &rd.zcr, flags);
     for(i = 0; i < rd.zcr.iovcnt; i++)
       got += rd.zcr.iov[i].iov_len;
 
     zfur_zc_recv_done(h.ur, &rd.zcr);
   } while( all && got < len );
 
- out:
-  return got ? got : rc;
+  return got;
 }
 
 
