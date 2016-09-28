@@ -16,10 +16,6 @@
 
 #ifdef USE_ZF
 #include <zf/zf.h>
-#include <zf/zf_udp.h>
-#include <zf/zf_tcp.h>
-#include <zf/zf_reactor.h>
-#include <zf/muxer.h>
 #endif
 
 static int         cfg_port = 2048;

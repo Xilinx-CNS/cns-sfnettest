@@ -12,7 +12,7 @@
 #include "sfnettest.h"
 
 #ifdef USE_ZF
-#include <zf/muxer.h>
+#include <zf/zf.h>
 #endif
 
 #define return_now(rc, flags, timeout)                                  \
