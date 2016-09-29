@@ -218,9 +218,8 @@ struct server {
   int       ss;
   int       read_fd;
   int       write_fd;
-  int       n_clients;
-  struct server_per_client clients[1];
   int       recv_size;
+  struct server_per_client client;
 };
 
 
@@ -904,7 +903,8 @@ static int do_server2(int ss)
 {
   struct server_per_client* client;
   struct server server;
-  int rc, i, sock;
+  char* hostport;
+  int rc, sock;
 
   server_check_ver(ss);
   server_recv_opts(ss);
@@ -954,21 +954,17 @@ static int do_server2(int ss)
   server.ss = ss;
   server.read_fd = sock;
   server.write_fd = sock;
-  server.n_clients = 1;
   server.recv_size = sizeof(ppbuf);
   /* TODO: for streaming fd_types we need to set recv_size to the size of
      the message */
 
-  for( i = 0; i < server.n_clients; ++i ) {
-    char* hostport;
-    client = &server.clients[i];
-    memset(client, 0, sizeof(*client));
-    hostport = sfnt_sock_get_str(ss);
-    if( ! sfnt_quiet )
-      sfnt_err("sfnt-stream: server: client %d at %s\n", i, hostport);
-    NT_TEST(sfnt_getaddrinfo(hostport, NULL, -1, &client->addrinfo) == 0);
-    free(hostport);
-  }
+  client = &server.client;
+  memset(client, 0, sizeof(*client));
+  hostport = sfnt_sock_get_str(ss);
+  if( ! sfnt_quiet )
+    sfnt_err("sfnt-stream: server: client at %s\n", hostport);
+  NT_TEST(sfnt_getaddrinfo(hostport, NULL, -1, &client->addrinfo) == 0);
+  free(hostport);
 
   return do_server3(&server);
 }
@@ -1037,7 +1033,7 @@ static int do_server3(struct server* server)
           recv_via_kernel = 0; 
         }
       }
-      client = &server->clients[0];
+      client = &server->client;
       if( ! (msg->flags & MF_RESET) ) {
         if( seq == client->seq_expected ) {
           ++client->seq_expected;
