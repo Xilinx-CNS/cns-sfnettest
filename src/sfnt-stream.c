@@ -27,7 +27,6 @@ static int         cfg_samples;
 static int         cfg_stop = 90;
 static int         cfg_max_burst = 100;
 static int         cfg_port = 2049;
-static int         cfg_connect[2];
 static int         cfg_spin[2];
 static const char* cfg_muxer[2];
 static int         cfg_rtt;
@@ -74,7 +73,6 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
                                        " given percentage of target"         ),
   CL1U("maxburst",    cfg_max_burst,   "max burst length"                    ),
   CL1U("port",        cfg_port,        "server port#"                        ),
-  CL2F("connect",     cfg_connect,     "connect() UDP socket"                ),
   CL2F("spin",        cfg_spin,        "spin on non-blocking recv()"         ),
   CL2S("muxer",       cfg_muxer,       "select, poll, epoll or none"         ),
   CL1F("rtt",         cfg_rtt,         "report round-trip-time"              ),
@@ -150,6 +148,7 @@ struct msg_reply {
   struct gap_stats gap_stats;
 };
 
+static enum handle_type handle_type;
 
 enum client_rx_cmd {
   CRXC_NEW,
@@ -174,7 +173,7 @@ struct client_rx {
   enum client_rx_cmd    state;
   struct msg_reply*     reply;
   int                   reply_buf_len;
-  int                   sock;
+  union handle          handle;
   int                   port;
   volatile int          n_rx;
   struct client_rx_rec* recs;
@@ -191,8 +190,8 @@ struct client_tx {
   struct msg*           msg;
   int                   msg_len;
   uint32_t              next_seq;
-  int                   write_fd;
-  int                   read_fd;
+  union handle          write_handle;
+  union handle          read_handle;
   int                   msg_per_sec_target;
   int                   msg_per_sec_tx;
   int                   msg_per_sec_rx;
@@ -216,26 +215,10 @@ struct server_per_client {
 
 struct server {
   int       ss;
-  int       read_fd;
-  int       write_fd;
+  union handle  read_handle;
+  union handle  write_handle;
   int       recv_size;
   struct server_per_client client;
-};
-
-
-enum fd_type_flags {
-  FDTF_SOCKET = 0x100,
-  FDTF_LOCAL  = 0x200,
-  FDTF_STREAM = 0x400,
-};
-
-
-enum fd_type {
-  FDT_TCP     = 0 | FDTF_SOCKET | 0          | FDTF_STREAM,
-  FDT_UDP     = 1 | FDTF_SOCKET | 0          | 0,
-  FDT_PIPE    = 2 | 0           | FDTF_LOCAL | FDTF_STREAM,
-  FDT_UNIX_S  = 3 | FDTF_SOCKET | FDTF_LOCAL | FDTF_STREAM,
-  FDT_UNIX_D  = 4 | FDTF_SOCKET | FDTF_LOCAL | 0,
 };
 
 
@@ -253,8 +236,8 @@ static char           msg_buf[64  * 1024];
 
 static int            client_rx_core_i;
 
-static enum fd_type   fd_type;
-static int            the_fds[4];  /* used for pipes and unix sockets */
+static enum handle_type   handle_type;
+static int                the_fds[4];  /* used for pipes and unix sockets */
 
 static fd_set         select_fdset;
 static int            select_fds[MAX_FDS];
@@ -276,10 +259,10 @@ static int                 pfds_n;
 static int                 epoll_fd;
 #endif
 
-static ssize_t (*do_recv)(int, void*, size_t, int);
-static ssize_t (*do_send)(int, const void*, size_t, int);
+static ssize_t (*do_recv)(union handle, void*, size_t, int);
+static ssize_t (*do_send)(union handle, const void*, size_t, int);
 
-static ssize_t (*mux_recv)(int, void*, size_t, int);
+static ssize_t (*mux_recv)(union handle, void*, size_t, int);
 static void (*mux_add)(int fd);
 
 static struct msghdr msg1;
@@ -338,33 +321,45 @@ zc_recv_callback(struct onload_zc_recv_args *args, int flag)
 
 /**********************************************************************/
 
-#define rfn_recv  recv
-
-
-static ssize_t sfn_sendto(int fd, const void* buf, size_t len, int flags)
+static inline ssize_t
+rfn_recv(union handle h, void* buf, size_t len, int flags)
 {
-  return sendto(fd, buf, len, 0, to_sa, to_sa_len);
+  return recv(h.fd, buf, len, flags);
 }
 
 
-#define sfn_send  send
+static ssize_t
+sfn_sendto(union handle h, const void* buf, size_t len, int flags)
+{
+  return sendto(h.fd, buf, len, 0, to_sa, to_sa_len);
+}
 
 
-static ssize_t rfn_read(int fd, void* buf, size_t len, int flags)
+static inline ssize_t
+sfn_send(union handle h, const void* buf, size_t len, int flags)
+{
+  return send(h.fd, buf, len, flags);
+}
+
+
+
+
+static ssize_t rfn_read(union handle h, void* buf, size_t len, int flags)
 {
   /* NB. To support non-blocking semantics caller must have set O_NONBLOCK. */
   int rc, got = 0, all = flags & MSG_WAITALL;
   do {
-    if( (rc = read(fd, (char*) buf + got, len - got)) > 0 )
+    if( (rc = read(h.fd, (char*) buf + got, len - got)) > 0 )
       got += rc;
   } while( all && got < len && rc > 0 );
   return got ? got : rc;
 }
 
 
-static ssize_t sfn_write(int fd, const void* buf, size_t len, int flags)
+static ssize_t sfn_write(union handle h, const void* buf, size_t len,
+                         int flags)
 {
-  return write(fd, buf, len);
+  return write(h.fd, buf, len);
 }
 
 /**********************************************************************/
@@ -384,7 +379,7 @@ static void select_add(int fd)
 }
 
 
-static ssize_t select_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t select_recv(union handle h, void* buf, size_t len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   int i, rc, got = 0, all = flags & MSG_WAITALL;
@@ -397,8 +392,8 @@ static ssize_t select_recv(int fd, void* buf, size_t len, int flags)
     rc = sfnt_select(select_max_fd + 1, &select_fdset, NULL, NULL, &tsc,
                      timeout_ms, mux_flags);
     if( rc == 1 ) {
-      NT_TEST(FD_ISSET(fd, &select_fdset));
-      if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
+      NT_TEST(FD_ISSET(h.fd, &select_fdset));
+      if( (rc = do_recv(h, (char*) buf + got, len - got, flags)) > 0 )
         got += rc;
     }
     else {
@@ -426,7 +421,7 @@ static void poll_add(int fd)
 }
 
 
-static ssize_t poll_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t poll_recv(union handle h, void* buf, size_t len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   int rc, got = 0, all = flags & MSG_WAITALL;
@@ -437,7 +432,7 @@ static ssize_t poll_recv(int fd, void* buf, size_t len, int flags)
     rc = sfnt_poll(pfds, pfds_n, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(pfds[0].revents & POLLIN);
-      if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
+      if( (rc = do_recv(h, (char*) buf + got, len - got, flags)) > 0 )
         got += rc;
     }
     else {
@@ -472,21 +467,21 @@ static void epoll_add(int fd)
 }
 
 
-static ssize_t epoll_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t epoll_recv(union handle h, void* buf, size_t len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   struct epoll_event e;
   int rc, got = 0, all = flags & MSG_WAITALL;
-  union handle h = { .fd = epoll_fd };
+  union handle mh = { .fd = epoll_fd };
 
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
   do {
-    rc = sfnt_epolltype_wait(h, HT_EPOLL, &e, 1, timeout_ms, &tsc, mux_flags);
+    rc = sfnt_epolltype_wait(mh, HT_EPOLL, &e, 1, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
-      if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
+      if( (rc = do_recv(h, (char*) buf + got, len - got, flags)) > 0 )
         got += rc;
     }
     else {
@@ -502,23 +497,23 @@ static ssize_t epoll_recv(int fd, void* buf, size_t len, int flags)
 }
 
 
-static ssize_t epoll_mod_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t epoll_mod_recv(union handle h, void* buf, size_t len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   struct epoll_event e;
   int rc, got = 0, all = flags & MSG_WAITALL;
-  union handle h = { .fd = epoll_fd };
+  union handle mh = { .fd = epoll_fd };
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
 
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
   e.events = EPOLLIN;
-  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &e));
+  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, h.fd, &e));
   do {
-    rc = sfnt_epolltype_wait(h, HT_EPOLL, &e, 1, timeout_ms, &tsc, mux_flags);
+    rc = sfnt_epolltype_wait(mh, HT_EPOLL, &e, 1, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
-      if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
+      if( (rc = do_recv(h, (char*) buf + got, len - got, flags)) > 0 )
         got += rc;
     }
     else {
@@ -531,28 +526,28 @@ static ssize_t epoll_mod_recv(int fd, void* buf, size_t len, int flags)
     }
   } while( all && got < len && rc > 0 );
   e.events = 0;
-  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &e));
+  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, h.fd, &e));
   return got ? got : rc;
 }
 
 
-static ssize_t epoll_adddel_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t epoll_adddel_recv(union handle h, void* buf, size_t len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   struct epoll_event e;
   int rc, got = 0, all = flags & MSG_WAITALL;
-  union handle h = { .fd = epoll_fd };
+  union handle mh = { .fd = epoll_fd };
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
 
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
   e.events = EPOLLIN;
-  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &e));
+  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, h.fd, &e));
   do {
-    rc = sfnt_epolltype_wait(h, HT_EPOLL, &e, 1, timeout_ms, &tsc, mux_flags);
+    rc = sfnt_epolltype_wait(mh, HT_EPOLL, &e, 1, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
-      if( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) > 0 )
+      if( (rc = do_recv(h, (char*) buf + got, len - got, flags)) > 0 )
         got += rc;
     }
     else {
@@ -565,7 +560,7 @@ static ssize_t epoll_adddel_recv(int fd, void* buf, size_t len, int flags)
     }
   } while( all && got < len && rc > 0 );
   e.events = 0;
-  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, &e));
+  NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, h.fd, &e));
   return got ? got : rc;
 }
 
@@ -573,7 +568,7 @@ static ssize_t epoll_adddel_recv(int fd, void* buf, size_t len, int flags)
 
 /**********************************************************************/
 
-static ssize_t spin_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t spin_recv(union handle h, void* buf, size_t len, int flags)
 {
   int rc, got = 0, all = flags & MSG_WAITALL;
   uint64_t tsc_now, tsc_timeout;
@@ -584,7 +579,7 @@ static ssize_t spin_recv(int fd, void* buf, size_t len, int flags)
   tsc_timeout += sfnt_msec_tsc(&tsc, timeout_ms);
 
   do {
-    while( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) < 0 )
+    while( (rc = do_recv(h, (char*) buf + got, len - got, flags)) < 0 )
       if( errno != EAGAIN ) {
         goto out;
       }
@@ -604,7 +599,7 @@ static ssize_t spin_recv(int fd, void* buf, size_t len, int flags)
 
 /**********************************************************************/
 
-static ssize_t do_recv_zc(int fd, void* buf, size_t len, int flags)
+static ssize_t do_recv_zc(union handle h, void* buf, size_t len, int flags)
 {
   struct onload_zc_recv_args zc_args;
   int rc, j,k;
@@ -630,10 +625,10 @@ static ssize_t do_recv_zc(int fd, void* buf, size_t len, int flags)
     zc_args.flags |= ONLOAD_MSG_DONTWAIT;
 
   next_msg_iov = send_iov_i;
-  k = onload_zc_recv(fd, &zc_args);
+  k = onload_zc_recv(h.fd, &zc_args);
   if( k == -ENOTEMPTY ) {
     recv_via_kernel = 1;
-    if( ( rc = onload_recvmsg_kernel(fd, &msg1, 0) ) < 0 )
+    if( ( rc = onload_recvmsg_kernel(h.fd, &msg1, 0) ) < 0 )
       printf("onload_recvmsg_kernel failed \n ");
     //errno = -rc;  
     return rc;
@@ -686,23 +681,25 @@ static void set_ttl(int sock, int ttl)
 }
 
 
-static void do_init(void)
+static void do_init(int /*bool*/ is_server)
 {
   const char* muxer = cfg_muxer[0];
 
   NT_TRY(sfnt_tsc_get_params(&tsc));
 
-  if( cfg_zc[0] && (fd_type != FDT_UDP) )
+  if( cfg_zc[0] && (handle_type != HT_UDP) )
     sfnt_fail_usage("ERROR: zerocopy support only available for UDP");
 
-  if( fd_type == FDT_UDP && ! cfg_connect[0] ) {
+  /* The server receives from one remote socket and sends to another, so we
+   * can't connect its socket. */
+  if( handle_type == HT_UDP && is_server ) {
     if( cfg_zc[0] )
       do_recv = do_recv_zc;
     else
       do_recv = rfn_recv;
     do_send = sfn_sendto;
   }
-  else if( fd_type & FDTF_SOCKET ) {
+  else if( handle_type & HTF_SOCKET ) {
     if( cfg_zc[0] )
       do_recv = do_recv_zc;
     else
@@ -830,8 +827,7 @@ static void server_check_ver(int ss)
 
 static void client_send_opts(int ss)
 {
-  sfnt_sock_put_int(ss, fd_type);
-  sfnt_sock_put_int(ss, cfg_connect[1]);
+  sfnt_sock_put_int(ss, handle_type);
   sfnt_sock_put_int(ss, cfg_spin[1]);
   sfnt_sock_put_str(ss, cfg_muxer[1]);
   sfnt_sock_put_str(ss, cfg_mcast);
@@ -853,8 +849,7 @@ static void client_send_opts(int ss)
 
 static void server_recv_opts(int ss)
 {
-  fd_type = sfnt_sock_get_int(ss);
-  cfg_connect[0] = sfnt_sock_get_int(ss);
+  handle_type = sfnt_sock_get_int(ss);
   cfg_spin[0] = sfnt_sock_get_int(ss);
   cfg_muxer[0] = sfnt_sock_get_str(ss);
   cfg_mcast = sfnt_sock_get_str(ss);
@@ -917,10 +912,10 @@ static int do_server2(int ss)
     cpu_affinity_set(core_i);
   }
 
-  /* No support for other fd_types yet. */
-  NT_TESTi3(fd_type, ==, FDT_UDP);
+  /* No support for other handle_types yet. */
+  NT_TESTi3(handle_type, ==, HT_UDP);
   /* Init after we've received config opts from client. */
-  do_init();
+  do_init(1);
 
   NT_TRY2(sock, socket(PF_INET, SOCK_DGRAM, 0));
   set_ttl(sock, cfg_ttl[0]);
@@ -952,10 +947,10 @@ static int do_server2(int ss)
   sfnt_sock_put_int(ss, sfnt_get_port(sock));
 
   server.ss = ss;
-  server.read_fd = sock;
-  server.write_fd = sock;
+  server.read_handle.fd = sock;
+  server.write_handle.fd = sock;
   server.recv_size = sizeof(ppbuf);
-  /* TODO: for streaming fd_types we need to set recv_size to the size of
+  /* TODO: for streaming handle_types we need to set recv_size to the size of
      the message */
 
   client = &server.client;
@@ -965,6 +960,8 @@ static int do_server2(int ss)
     sfnt_err("sfnt-stream: server: client at %s\n", hostport);
   NT_TEST(sfnt_getaddrinfo(hostport, NULL, -1, &client->addrinfo) == 0);
   free(hostport);
+  to_sa = client->addrinfo->ai_addr;
+  to_sa_len = client->addrinfo->ai_addrlen;
 
   return do_server3(&server);
 }
@@ -1012,13 +1009,13 @@ static int do_server3(struct server* server)
   msg1.msg_iov->iov_base = msg_buf;
   msg1.msg_iov->iov_len = server->recv_size;
 
-  if( fd_type & FDTF_STREAM )
+  if( handle_type & HTF_STREAM )
     flags |= MSG_WAITALL;
 
   (void) get_recv_size(server);
 
   while( 1 ) {
-    rc = mux_recv(server->read_fd, msg, server->recv_size, flags);
+    rc = mux_recv(server->read_handle, msg, server->recv_size, flags);
 
     if( rc > 0 ) {
       uint32_t seq = NT_LE32(msg->seq);
@@ -1056,14 +1053,13 @@ static int do_server3(struct server* server)
         if( msg->flags & MF_TIMESTAMP )
           sfnt_tsc(&reply->s_timestamp);
         reply->gap_stats = client->gap_stats;
-        rc = sendto(server->write_fd, reply, sizeof(*reply), 0,
-                    client->addrinfo->ai_addr, client->addrinfo->ai_addrlen);
+        rc = do_send(server->write_handle, reply, sizeof(*reply), 0);
         NT_TESTi3(rc, ==, sizeof(*reply));
       }
     }
     else if( rc == 0 ) {
       if( cfg_zc[0] && send_iov_i > 0 ) {
-        if( onload_zc_release_buffers(server->read_fd, send_buf, 
+        if( onload_zc_release_buffers(server->read_handle.fd, send_buf, 
                                       send_buf_i) != 0 )
           printf("ERROR: Failed to release buffers\n");
         send_buf_i = 0;
@@ -1076,7 +1072,7 @@ static int do_server3(struct server* server)
 	break;
     }
     if( cfg_zc[0] && (send_iov_i >= (BUF_SZ - MAX_BUFS_PER_PKT)) ) {
-      if( onload_zc_release_buffers(server->read_fd, send_buf, 
+      if( onload_zc_release_buffers(server->read_handle.fd, send_buf, 
                                     send_buf_i) != 0 )
         printf("ERROR: Failed to release buffers\n");
       send_iov_i = 0;
@@ -1162,14 +1158,14 @@ static void client_rx_go(struct client_rx* crx)
   msg1.msg_iov->iov_base = msg_buf;
   msg1.msg_iov->iov_len = crx->reply_buf_len;
 
-  if( fd_type & FDTF_STREAM )
+  if( handle_type & HTF_STREAM )
     flags |= MSG_WAITALL;
 
   memset(crx->recs, 0, crx->recs_max * sizeof(crx->recs[0]));
   crx->recs_n = 0;
 
   while( 1 ) {
-    rc = mux_recv(crx->sock, crx->reply, crx->reply_buf_len, flags);
+    rc = mux_recv(crx->handle, crx->reply, crx->reply_buf_len, flags);
     sfnt_tsc(&now);
     if( cfg_zc[0] ) {
       if(!recv_via_kernel) 
@@ -1197,7 +1193,7 @@ static void client_rx_go(struct client_rx* crx)
       }
       if( crx->reply->flags & MF_STOP ) {
         if( cfg_zc[0] ) {
-          if( onload_zc_release_buffers(crx->sock, send_buf, 
+          if( onload_zc_release_buffers(crx->handle.fd, send_buf, 
                                         send_buf_i) != 0 )
             printf("ERROR: Failed to release buffers\n ");
           send_iov_i = 0;
@@ -1215,7 +1211,7 @@ static void client_rx_go(struct client_rx* crx)
       if( send_iov_i > BUF_SZ )
         sfnt_err("ERROR: send_iov_i out of range %d > %d\n", send_iov_i, 
                  BUF_SZ);
-      if( onload_zc_release_buffers(crx->sock, send_buf, send_buf_i) != 0 )
+      if( onload_zc_release_buffers(crx->handle.fd, send_buf, send_buf_i) != 0 )
         printf("ERROR: Failed to release buffers\n ");
       send_iov_i = 0;
       send_buf_i = 0;
@@ -1234,18 +1230,18 @@ static void* client_rx_thread(void* arg)
     cpu_affinity_set(client_rx_core_i);
   crx->reply_buf_len = 64 * 1024;
   crx->reply = malloc(crx->reply_buf_len);
-  switch( fd_type ) {
-  case FDT_UDP:
-    NT_TRY2(crx->sock, socket(PF_INET, SOCK_DGRAM, 0));
+  switch( handle_type ) {
+  case HT_UDP:
+    NT_TRY2(crx->handle.fd, socket(PF_INET, SOCK_DGRAM, 0));
     sin.sin_family = AF_INET;
     sin.sin_addr.s_addr = htonl(INADDR_ANY);
     sin.sin_port = 0;
-    NT_TRY(bind(crx->sock, (const struct sockaddr*) &sin, sizeof(sin)));
+    NT_TRY(bind(crx->handle.fd, (const struct sockaddr*) &sin, sizeof(sin)));
     crx->recs = malloc(crx->recs_max * sizeof(crx->recs[0]));
     memset(crx->recs, 0, crx->recs_max * sizeof(crx->recs[0]));
     crx->recs_n = 0;
-    crx->port = sfnt_get_port(crx->sock);
-    add_fds(crx->sock);
+    crx->port = sfnt_get_port(crx->handle.fd);
+    add_fds(crx->handle.fd);
     break;
   default:
     NT_ASSERT(0); /* ?? todo */
@@ -1311,7 +1307,7 @@ static void client_send_sync(struct client_tx* ctx, enum msg_flags flags)
   ++msg->reply_seq;
   seq = ctx->next_seq++;
   msg->seq = NT_LE32(seq);
-  rc = send(ctx->write_fd, msg, ctx->msg_len, 0);
+  rc = do_send(ctx->write_handle, msg, ctx->msg_len, 0);
   NT_TESTi3(rc, ==, ctx->msg_len);
 }
 
@@ -1526,7 +1522,7 @@ static void client_do_test(struct client_tx* ctx)
       ++ctx->n_fall_behinds;
     }
     msg->send_lateness = msg->timestamp - ts_next_send;
-    rc = send(ctx->write_fd, msg, ctx->msg_len, 0);
+    rc = do_send(ctx->write_handle, msg, ctx->msg_len, 0);
     NT_TESTi3(rc, ==, ctx->msg_len);
     ts_last_send = msg->timestamp;
     ts_next_send += ticks_per_msg;
@@ -1572,7 +1568,7 @@ static void client_measure_rtt(struct client_tx* ctx, struct stats* stats)
     msg->seq = NT_LE32(seq);
     ++msg->reply_seq;
     sfnt_tsc(&msg->timestamp);
-    rc = send(ctx->write_fd, msg, msg_len, 0);
+    rc = do_send(ctx->write_handle, msg, msg_len, 0);
     NT_TESTi3(rc, ==, msg_len);
     rc = client_rx_wait_sync(crx, seq, 1000);
   }
@@ -1630,7 +1626,7 @@ static int do_client3(struct client_tx* ctx);
 static int do_client(int argc, char* argv[])
 {
   const char* hostport;
-  const char* fd_type_s;
+  const char* handle_type_s;
   pid_t pid;
 
   if( cfg_msg_size < sizeof(struct msg) )
@@ -1639,37 +1635,37 @@ static int do_client(int argc, char* argv[])
 
   if( argc < 1 || argc > 2 )
     sfnt_fail_usage("wrong number of arguments");
-  fd_type_s = argv[0];
-  if( ! strcasecmp(fd_type_s, "tcp") )
-    fd_type = FDT_TCP;
-  else if( ! strcasecmp(fd_type_s, "udp") )
-    fd_type = FDT_UDP;
-  else if( ! strcasecmp(fd_type_s, "pipe") )
-    fd_type = FDT_PIPE;
-  else if( ! strcasecmp(fd_type_s, "unix_stream") )
-    fd_type = FDT_UNIX_S;
-  else if( ! strcasecmp(fd_type_s, "unix_datagram") )
-    fd_type = FDT_UNIX_D;
+  handle_type_s = argv[0];
+  if( ! strcasecmp(handle_type_s, "tcp") )
+    handle_type = HT_TCP;
+  else if( ! strcasecmp(handle_type_s, "udp") )
+    handle_type = HT_UDP;
+  else if( ! strcasecmp(handle_type_s, "pipe") )
+    handle_type = HT_PIPE;
+  else if( ! strcasecmp(handle_type_s, "unix_stream") )
+    handle_type = HT_UNIX_S;
+  else if( ! strcasecmp(handle_type_s, "unix_datagram") )
+    handle_type = HT_UNIX_D;
   else
-    sfnt_fail_usage("unknown fd_type '%s'", fd_type_s);
+    sfnt_fail_usage("unknown handle_type '%s'", handle_type_s);
 
   if( cfg_samples == 0 )
     /* Default to one latency sample per millisecond of test time. */
     cfg_samples = cfg_millisec;
 
-  if( fd_type & FDTF_LOCAL ) {
+  if( handle_type & HTF_LOCAL ) {
     int ss[2];
     if( argc != 1 )
       sfnt_fail_usage("wrong number of arguments for local socket");
-    switch( fd_type ) {
-    case FDT_PIPE:
+    switch( handle_type ) {
+    case HT_PIPE:
       NT_TRY(pipe(the_fds));
       NT_TRY(pipe(the_fds + 2));
       break;
-    case FDT_UNIX_S:
+    case HT_UNIX_S:
       NT_TRY(socketpair(PF_UNIX, SOCK_STREAM, 0, the_fds));
       break;
-    case FDT_UNIX_D:
+    case HT_UNIX_D:
       NT_TRY(socketpair(PF_UNIX, SOCK_DGRAM, 0, the_fds));
       break;
     default:
@@ -1741,7 +1737,7 @@ static int do_client2(int ss, const char* hostport, int local)
   if( cfg_mcast_intf[0] != NULL && cfg_mcast == NULL )
     cfg_mcast = "224.1.2.49";
 
-  do_init();
+  do_init(0);
   client_send_opts(ss);
   ctx = malloc(sizeof(*ctx));
   ctx->ss = ss;
@@ -1753,23 +1749,23 @@ static int do_client2(int ss, const char* hostport, int local)
   ctx->server_ld_preload = sfnt_sock_get_str(ss);
 
   /* Create and bind/connect test socket. */
-  switch( fd_type ) {
-  case FDT_TCP: {
+  switch( handle_type ) {
+  case HT_TCP: {
     int port = sfnt_sock_get_int(ss);
     char host[strlen(hostport) + 1];
     char* p;
     strcpy(host, hostport);
     if( (p = strchr(host, ':')) != NULL )
       *p = '\0';
-    NT_TRY2(ctx->read_fd, socket(PF_INET, SOCK_STREAM, 0));
+    NT_TRY2(ctx->read_handle.fd, socket(PF_INET, SOCK_STREAM, 0));
     if( cfg_nodelay )
-      NT_TRY(setsockopt(ctx->read_fd, SOL_TCP, TCP_NODELAY,
+      NT_TRY(setsockopt(ctx->read_handle.fd, SOL_TCP, TCP_NODELAY,
                         &one, sizeof(one)));
-    NT_TRY(sfnt_connect(ctx->read_fd, host, NULL, port));
-    ctx->write_fd = ctx->read_fd;
+    NT_TRY(sfnt_connect(ctx->read_handle.fd, host, NULL, port));
+    ctx->write_handle.fd = ctx->read_handle.fd;
     break;
   }
-  case FDT_UDP: {
+  case HT_UDP: {
     struct sockaddr_in sin;
     socklen_t sin_len = sizeof(sin);
     int us, port = sfnt_sock_get_int(ss);
@@ -1797,25 +1793,27 @@ static int do_client2(int ss, const char* hostport, int local)
     sprintf(reply_hostport, "%s:%d",
             inet_ntoa(sin.sin_addr), ctx->crx->port);
     sfnt_sock_put_str(ss, reply_hostport);
-    ctx->write_fd = us;
-    ctx->read_fd = -1;
+    ctx->write_handle.fd = us;
+    ctx->read_handle.fd = -1;
     break;
   }
-  case FDT_PIPE:
-    ctx->read_fd = the_fds[0];
-    ctx->write_fd = the_fds[3];
+  case HT_PIPE:
+    ctx->read_handle.fd = the_fds[0];
+    ctx->write_handle.fd = the_fds[3];
     if( cfg_spin[0] ) {
-      sfnt_fd_set_nonblocking(ctx->read_fd);
-      sfnt_fd_set_nonblocking(ctx->write_fd);
+      sfnt_fd_set_nonblocking(ctx->read_handle.fd);
+      sfnt_fd_set_nonblocking(ctx->write_handle.fd);
     }
     break;
-  case FDT_UNIX_S:
-  case FDT_UNIX_D:
-    ctx->read_fd = ctx->write_fd = the_fds[0];
+  case HT_UNIX_S:
+  case HT_UNIX_D:
+    ctx->read_handle.fd = ctx->write_handle.fd = the_fds[0];
     break;
+  default:
+    NT_ASSERT(0);
   }
-  if( ctx->read_fd >= 0 )
-    add_fds(ctx->read_fd);
+  if( ctx->read_handle.fd >= 0 )
+    add_fds(ctx->read_handle.fd);
 
   return do_client3(ctx);
 }
