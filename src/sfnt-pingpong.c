@@ -1140,7 +1140,7 @@ static void add_zocket(union handle h)
     struct epoll_event e;
     e.events = EPOLLIN;
 
-    struct zf_waitable* w;
+    struct zf_waitable* w = NULL;  /* Initialise to placate compiler. */
     if( handle_type == HT_ZF_UDP ) {
       w = zfur_to_waitable(h.ur);
     }

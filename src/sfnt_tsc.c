@@ -16,7 +16,8 @@ static uint64_t measure_hz(int interval_usec)
 {
   struct timeval tv_s, tv_e;
   uint64_t tsc_s, tsc_e, tsc_e2;
-  uint64_t tsc_gtod, min_tsc_gtod, usec;
+  uint64_t tsc_gtod, min_tsc_gtod;
+  uint64_t usec = 0;  /* Initialise to placate compiler. */
   int n, skew = 0;
 
   sfnt_tsc(&tsc_s);

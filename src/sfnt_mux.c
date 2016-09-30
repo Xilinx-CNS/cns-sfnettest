@@ -152,7 +152,7 @@ int sfnt_select(int nfds, fd_set* readfds, fd_set* writefds,
   struct timeval* timeout = NULL;
   uint64_t tsc_timeout;
   struct timeval timeout_s;
-  int rc, fds_bytes;
+  int rc, fds_bytes = 0;  /* Initialise to placate compiler. */
 
   if( timeout_ms > 0 && ! (flags & NT_MUX_SPIN) ) {
     timeout_s.tv_sec = timeout_ms / 1000;
