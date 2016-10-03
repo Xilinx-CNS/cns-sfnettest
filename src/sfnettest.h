@@ -190,6 +190,9 @@ do {                                                        \
 } while(0)
 
 
+#define NT_MIN(a, b) ((a) < (b) ? (a) : (b))
+#define NT_MAX(a, b) ((a) > (b) ? (a) : (b))
+
 /**********************************************************************
  * Common descriptor structure
  */

@@ -13,6 +13,10 @@
 #include "sfnettest.h"
 #include <onload/extensions_zc.h>
 
+#ifdef USE_ZF
+#include <zf/zf.h>
+#endif
+
 /* TODO:
  *  other fd types
  *  measure how long send call takes
@@ -74,7 +78,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1U("maxburst",    cfg_max_burst,   "max burst length"                    ),
   CL1U("port",        cfg_port,        "server port#"                        ),
   CL2F("spin",        cfg_spin,        "spin on non-blocking recv()"         ),
-  CL2S("muxer",       cfg_muxer,       "select, poll, epoll or none"         ),
+  CL2S("muxer",       cfg_muxer,       "select, poll, epoll, zf or none"     ),
   CL1F("rtt",         cfg_rtt,         "report round-trip-time"              ),
   CL1S("raw",         cfg_raw,         "dump raw results to files"           ),
   CL1D("percentile",  cfg_percentile,  "percentile"                          ),
@@ -244,6 +248,10 @@ static int            select_fds[MAX_FDS];
 static int            select_n_fds;
 static int            select_max_fd;
 
+#ifdef USE_ZF
+static struct sockaddr_in  my_sa;
+#endif
+
 static struct sockaddr*    to_sa;
 static socklen_t           to_sa_len;
 
@@ -257,6 +265,15 @@ static int                 pfds_n;
 
 #if NT_HAVE_EPOLL
 static int                 epoll_fd;
+#endif
+
+#ifdef USE_ZF
+static struct zf_muxer_set* zf_mux;
+static struct zf_attr* zattr;
+/* ztack is used by the (single-threaded) server for RX and TX and by the
+ * client for RX only.  The client uses ztack_client_tx for TX. */
+static struct zf_stack* ztack;
+static struct zf_stack* ztack_client_tx = NULL;
 #endif
 
 static ssize_t (*do_recv)(union handle, void*, size_t, int);
@@ -361,6 +378,87 @@ static ssize_t sfn_write(union handle h, const void* buf, size_t len,
 {
   return write(h.fd, buf, len);
 }
+
+#ifdef USE_ZF
+static ssize_t rfn_zfur_recv(union handle h, void* buf, size_t len, int flags)
+{
+  struct {
+    struct zfur_msg zcr;
+    struct iovec iov[1];
+  } rd;
+
+  int got = 0, all = flags & MSG_WAITALL;
+  uint64_t tsc_now, tsc_timeout;
+  flags = 0;
+
+  sfnt_tsc(&tsc_timeout);
+  tsc_timeout += sfnt_msec_tsc(&tsc, timeout_ms);
+
+  do {
+    rd.zcr.iovcnt = 1;
+    zfur_zc_recv(h.ur, &rd.zcr, flags);
+    if( rd.zcr.iovcnt == 1 ) {
+      size_t bufferable_payload_len = NT_MIN(len - got,
+                                             rd.zcr.iov[0].iov_len);
+      got += bufferable_payload_len;
+      memcpy(buf, rd.zcr.iov[0].iov_base, bufferable_payload_len);
+      buf = (char*) buf + bufferable_payload_len;
+      zfur_zc_recv_done(h.ur, &rd.zcr);
+    }
+    else if( rd.zcr.iovcnt != 0 ) {
+      NT_ASSERT(0);
+    }
+    else {
+      /* Wait for something to happen on the stack. */
+      while( zf_reactor_perform(ztack) == 0 ) {
+        sfnt_tsc(&tsc_now);
+        if( timeout_ms && tsc_now >= tsc_timeout ) {
+          errno = EAGAIN;
+          goto out;
+        }
+      }
+    }
+  } while( got == 0 || (all && got < len) );
+
+ out:
+  return got ? got : -1;
+}
+
+
+static void maybe_poll_tx_ztack(void)
+{
+  const unsigned POLL_PERIOD = 256;
+  static unsigned ticker = 0;
+  if( (++ticker & (POLL_PERIOD - 1)) == 0 && ztack_client_tx != NULL )
+    while( zf_reactor_perform(ztack_client_tx) != 0 );
+}
+
+
+static ssize_t sfn_zfut_send(union handle h, const void* buf, size_t len,
+                             int flags)
+{
+  const struct iovec siov = {
+    .iov_base = (void*)buf,
+    .iov_len = len
+  };
+  int rc;
+
+  do {
+    rc = zfut_send(h.ut, &siov, 1, 0);
+    if( rc == -EAGAIN ) {
+      /* If we've filled the TXQ, wait until it opens up. */
+      struct zf_stack* ztack_tx =
+        ztack_client_tx != NULL ? ztack_client_tx : ztack;
+      while( zf_reactor_perform(ztack_tx) == 0 );
+    }
+    else {
+      maybe_poll_tx_ztack();
+    }
+  } while( rc == -EAGAIN );
+  return rc == 0 ? len : rc;
+}
+#endif
+
 
 /**********************************************************************/
 
@@ -467,25 +565,35 @@ static void epoll_add(int fd)
 }
 
 
-static ssize_t epoll_recv(union handle h, void* buf, size_t len, int flags)
+static ssize_t epolltype_recv(union handle h, void* buf, size_t len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
   struct epoll_event e;
   int rc, got = 0, all = flags & MSG_WAITALL;
-  union handle mh = { .fd = epoll_fd };
-
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
+  union handle mh;
+  enum handle_type mh_type;
+  if( handle_type & HTF_ZF ) {
+#ifdef USE_ZF
+    mh.zf_mux = zf_mux;
+    mh_type = HT_ZF_MUX;
+#endif
+  }
+  else {
+    mh.fd = epoll_fd;
+    mh_type = HT_EPOLL;
+  }
+
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
   do {
-    rc = sfnt_epolltype_wait(mh, HT_EPOLL, &e, 1, timeout_ms, &tsc, mux_flags);
+    rc = sfnt_epolltype_wait(mh, mh_type, &e, 1, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
       NT_TEST(e.events & EPOLLIN);
       if( (rc = do_recv(h, (char*) buf + got, len - got, flags)) > 0 )
         got += rc;
     }
     else {
-      NT_TESTi3(rc, <=, 0);
       if( rc == 0 && got == 0 ) {
         errno = EAGAIN;
         rc = -1;
@@ -564,6 +672,15 @@ static ssize_t epoll_adddel_recv(union handle h, void* buf, size_t len, int flag
   return got ? got : rc;
 }
 
+#endif
+
+/**********************************************************************/
+
+#ifdef USE_ZF
+static void zf_mux_init(void)
+{
+  NT_TRY(zf_muxer_alloc(ztack, &zf_mux));
+}
 #endif
 
 /**********************************************************************/
@@ -681,6 +798,18 @@ static void set_ttl(int sock, int ttl)
 }
 
 
+#ifdef USE_ZF
+static void do_zf_init(int /*bool*/ is_server)
+{
+  NT_TRY(zf_init());
+  NT_TRY(zf_attr_alloc(&zattr));
+  NT_TRY(zf_stack_alloc(zattr, &ztack));
+  if( ! is_server )
+    NT_TRY(zf_stack_alloc(zattr, &ztack_client_tx));
+}
+#endif
+
+
 static void do_init(int /*bool*/ is_server)
 {
   const char* muxer = cfg_muxer[0];
@@ -706,47 +835,124 @@ static void do_init(int /*bool*/ is_server)
       do_recv = rfn_recv;
     do_send = sfn_send;
   }
+#ifdef USE_ZF
+  else if( handle_type & HTF_ZF ) {
+    if( cfg_zc[0] ) {
+      sfnt_err("ERROR: Onload zero copy not supported for zockets\n");
+      sfnt_fail_setup();
+    }
+
+    if( handle_type == HT_ZF_UDP ) {
+      do_recv = rfn_zfur_recv;
+      do_send = sfn_zfut_send;
+    }
+    else {
+      NT_ASSERT(0);
+    }
+
+    do_zf_init(is_server);
+  }
+#endif
   else {
     do_recv = rfn_read;
     do_send = sfn_write;
   }
 
-  if( muxer == NULL || ! strcmp(muxer, "") || ! strcasecmp(muxer, "none") ) {
-    mux_recv = cfg_spin[0] ? spin_recv : do_recv;
-    mux_add = noop_add;
+  /* If we're using the direct zockets API we must use an appropriate muxer
+   * type, so check mux separately in that case.
+   */
+  if( handle_type & HTF_ZF ) {
+#ifdef USE_ZF
+    if( muxer == NULL || ! strcmp(muxer, "") || ! strcasecmp(muxer, "none") ) {
+      mux_recv = cfg_spin[0] ? spin_recv : do_recv;
+      mux_add = noop_add;
+    }
+    else if( ! strcasecmp(muxer, "zf") ) {
+      mux_recv = epolltype_recv;
+      /* mux_add is used for adding additional fds to a mux set - adding to
+       * a mux set for zockets is handled explicitly
+       */
+      mux_add = noop_add;
+      zf_mux_init();
+    }
+    else {
+      sfnt_fail_usage("ERROR: muxer '%s' unknown, or invalid with zockets",
+                      muxer);
+    }
+#else
+    /* Shouldn't be using a zocket if we're not built with zf */
+    NT_ASSERT(0);
+#endif
   }
-  else if( ! strcasecmp(muxer, "select") ) {
-    mux_recv = select_recv;
-    mux_add = select_add;
-    select_init();
-  }
+  else {
+    if( muxer == NULL || ! strcmp(muxer, "") || ! strcasecmp(muxer, "none") ) {
+      mux_recv = cfg_spin[0] ? spin_recv : do_recv;
+      mux_add = noop_add;
+    }
+    else if( ! strcasecmp(muxer, "select") ) {
+      mux_recv = select_recv;
+      mux_add = select_add;
+      select_init();
+    }
 #if NT_HAVE_POLL
-  else if( ! strcasecmp(muxer, "poll") ) {
-    mux_recv = poll_recv;
-    mux_add = poll_add;
-  }
+    else if( ! strcasecmp(muxer, "poll") ) {
+      mux_recv = poll_recv;
+      mux_add = poll_add;
+    }
 #endif
 #if NT_HAVE_EPOLL
-  else if( ! strcasecmp(muxer, "epoll") ) {
-    mux_recv = epoll_recv;
-    mux_add = epoll_add;
-    epoll_init();
-  }
-  else if( ! strcasecmp(muxer, "epoll_mod") ) {
-    mux_recv = epoll_mod_recv;
-    mux_add = epoll_add;
-    epoll_init();
-  }
-  else if( ! strcasecmp(muxer, "epoll_adddel") ) {
-    mux_recv = epoll_adddel_recv;
-    mux_add = noop_add;
-    epoll_init();
-  }
+    else if( ! strcasecmp(muxer, "epoll") ) {
+      mux_recv = epolltype_recv;
+      mux_add = epoll_add;
+      epoll_init();
+    }
+    else if( ! strcasecmp(muxer, "epoll_mod") ) {
+      mux_recv = epoll_mod_recv;
+      mux_add = epoll_add;
+      epoll_init();
+    }
+    else if( ! strcasecmp(muxer, "epoll_adddel") ) {
+      mux_recv = epoll_adddel_recv;
+      mux_add = noop_add;
+      epoll_init();
+    }
 #endif
-  else {
-    sfnt_fail_usage("ERROR: Unknown muxer");
+    else {
+      sfnt_fail_usage("ERROR: Unknown muxer");
+    }
   }
 }
+
+
+#ifdef USE_ZF
+static void add_zocket(union handle h)
+{
+  /* In future we could add the options to put additional zocket types in
+   * the mux set, but for now we only add the test zocket.
+   */
+  if( (cfg_n_pipe[0] > 0) || (cfg_n_unixd[0] > 0) || (cfg_n_udp[0] > 0) ||
+      (cfg_n_tcpc[0] > 0) || (cfg_n_tcpl[0] > 0) ) {
+    sfnt_err("ERROR: Cannot mix normal fds with zockets for muxing\n");
+    sfnt_fail_setup();
+  }
+
+  if( zf_mux ) {
+    struct epoll_event e;
+    e.events = EPOLLIN;
+
+    struct zf_waitable* w = NULL;  /* Initialise to placate compiler. */
+    if( handle_type == HT_ZF_UDP ) {
+      w = zfur_to_waitable(h.ur);
+    }
+    else {
+      sfnt_err("ERROR: Only UDP zockets supported for zf muxing currently\n");
+      sfnt_fail_setup();
+    }
+
+    NT_TRY(zf_muxer_add(zf_mux, w, &e));
+  }
+}
+#endif
 
 
 static void add_fds(int us)
@@ -869,6 +1075,19 @@ static void server_recv_opts(int ss)
 }
 
 
+#ifdef USE_ZF
+/* FIXME This is a temporary hack until we have cplane and port selection */
+static void zf_udp_setup_addrs(int ss)
+{
+  socklen_t my_sa_len;
+  my_sa_len = sizeof(my_sa);
+
+  /* Use the same local interface as the setup socket */
+  NT_TRY(getsockname(ss, (struct sockaddr*) &my_sa, &my_sa_len));
+  my_sa.sin_port = htons(11111);
+}
+#endif
+
 static int do_server2(int ss);
 static int do_server3(struct server* server);
 
@@ -898,8 +1117,9 @@ static int do_server2(int ss)
 {
   struct server_per_client* client;
   struct server server;
+  int rc;
   char* hostport;
-  int rc, sock;
+  union handle read_handle, write_handle;
 
   server_check_ver(ss);
   server_recv_opts(ss);
@@ -912,43 +1132,65 @@ static int do_server2(int ss)
     cpu_affinity_set(core_i);
   }
 
-  /* No support for other handle_types yet. */
-  NT_TESTi3(handle_type, ==, HT_UDP);
   /* Init after we've received config opts from client. */
   do_init(1);
 
-  NT_TRY2(sock, socket(PF_INET, SOCK_DGRAM, 0));
-  set_ttl(sock, cfg_ttl[0]);
-  if( cfg_bindtodev[0] )
-    NT_TRY(sfnt_so_bindtodevice(sock, cfg_bindtodev[0]));
-  if( cfg_mcast ) {
-    struct sockaddr_in sin;
-    sin.sin_family = AF_INET;
-    sin.sin_port = 0;
-    if( 1 )  /* allows us to support mcast or unicast receive */
-      sin.sin_addr.s_addr = htonl(INADDR_ANY);
-    else
-      sin.sin_addr.s_addr = inet_addr(cfg_mcast);
-    NT_TRY(bind(sock, (const struct sockaddr*) &sin, sizeof(sin)));
-    rc = sfnt_ip_add_membership(sock, inet_addr(cfg_mcast), cfg_mcast_intf[0]);
-    if( rc != 0 ) {
-      sfnt_err("ERROR: failed to join '%s' on interface '%s'\n",
-               cfg_mcast, cfg_mcast_intf[0]);
-      sfnt_err("ERROR: rc=%d errno=(%d %s) gai_strerror=(%s)\n",
-               rc, errno, strerror(errno), gai_strerror(rc));
-      sfnt_fail_setup();
+  switch( handle_type ) {
+  case HT_UDP:
+    NT_TRY2(read_handle.fd, socket(PF_INET, SOCK_DGRAM, 0));
+    set_ttl(read_handle.fd, cfg_ttl[0]);
+    if( cfg_bindtodev[0] )
+      NT_TRY(sfnt_so_bindtodevice(read_handle.fd, cfg_bindtodev[0]));
+    if( cfg_mcast ) {
+      struct sockaddr_in sin;
+      sin.sin_family = AF_INET;
+      sin.sin_port = 0;
+      if( 1 )  /* allows us to support mcast or unicast receive */
+        sin.sin_addr.s_addr = htonl(INADDR_ANY);
+      else
+        sin.sin_addr.s_addr = inet_addr(cfg_mcast);
+      NT_TRY(bind(read_handle.fd, (const struct sockaddr*) &sin, sizeof(sin)));
+      rc = sfnt_ip_add_membership(read_handle.fd,
+                                  inet_addr(cfg_mcast), cfg_mcast_intf[0]);
+      if( rc != 0 ) {
+        sfnt_err("ERROR: failed to join '%s' on interface '%s'\n",
+                 cfg_mcast, cfg_mcast_intf[0]);
+        sfnt_err("ERROR: rc=%d errno=(%d %s) gai_strerror=(%s)\n",
+                 rc, errno, strerror(errno), gai_strerror(rc));
+        sfnt_fail_setup();
+      }
     }
+    else {
+      NT_TRY(sfnt_bind_port(read_handle.fd, 0));
+    }
+    write_handle.fd = read_handle.fd;
+    sfnt_sock_put_int(ss, sfnt_get_port(read_handle.fd));
+    NT_TRY(sfnt_sock_set_timeout(read_handle.fd, SO_RCVTIMEO, timeout_ms));
+
+    break;
+#ifdef USE_ZF
+  case HT_ZF_UDP:
+    zf_udp_setup_addrs(ss);
+    NT_TRY(zfur_alloc(&read_handle.ur, ztack, zattr));
+    NT_TRY(zfur_addr_bind(read_handle.ur, &my_sa, NULL, 0));
+    sfnt_sock_put_int(ss, ntohs(my_sa.sin_port));
+    break;
+#endif
+  default:
+    /* No support for other handle_types yet. */
+    NT_TEST(0);
   }
-  else {
-    NT_TRY(sfnt_bind_port(sock, 0));
-  }
-  add_fds(sock);
-  NT_TRY(sfnt_sock_set_timeout(sock, SO_RCVTIMEO, timeout_ms));
-  sfnt_sock_put_int(ss, sfnt_get_port(sock));
+
+#ifdef USE_ZF
+  if( handle_type & HTF_ZF )
+    add_zocket(read_handle);
+  else
+#endif
+    add_fds(read_handle.fd);
 
   server.ss = ss;
-  server.read_handle.fd = sock;
-  server.write_handle.fd = sock;
+  server.read_handle = read_handle;
+  server.write_handle = write_handle;
   server.recv_size = sizeof(ppbuf);
   /* TODO: for streaming handle_types we need to set recv_size to the size of
      the message */
@@ -962,6 +1204,12 @@ static int do_server2(int ss)
   free(hostport);
   to_sa = client->addrinfo->ai_addr;
   to_sa_len = client->addrinfo->ai_addrlen;
+
+#ifdef USE_ZF
+  if( handle_type == HT_ZF_UDP )
+    NT_TRY(zfut_alloc(&server.write_handle.ut, ztack, &my_sa,
+                      (struct sockaddr_in*) to_sa, 0, zattr));
+#endif
 
   return do_server3(&server);
 }
@@ -1230,6 +1478,9 @@ static void* client_rx_thread(void* arg)
     cpu_affinity_set(client_rx_core_i);
   crx->reply_buf_len = 64 * 1024;
   crx->reply = malloc(crx->reply_buf_len);
+  crx->recs = malloc(crx->recs_max * sizeof(crx->recs[0]));
+  memset(crx->recs, 0, crx->recs_max * sizeof(crx->recs[0]));
+  crx->recs_n = 0;
   switch( handle_type ) {
   case HT_UDP:
     NT_TRY2(crx->handle.fd, socket(PF_INET, SOCK_DGRAM, 0));
@@ -1237,12 +1488,17 @@ static void* client_rx_thread(void* arg)
     sin.sin_addr.s_addr = htonl(INADDR_ANY);
     sin.sin_port = 0;
     NT_TRY(bind(crx->handle.fd, (const struct sockaddr*) &sin, sizeof(sin)));
-    crx->recs = malloc(crx->recs_max * sizeof(crx->recs[0]));
-    memset(crx->recs, 0, crx->recs_max * sizeof(crx->recs[0]));
-    crx->recs_n = 0;
     crx->port = sfnt_get_port(crx->handle.fd);
     add_fds(crx->handle.fd);
     break;
+#ifdef USE_ZF
+  case HT_ZF_UDP:
+    NT_TRY(zfur_alloc(&crx->handle.ur, ztack, zattr));
+    NT_TRY(zfur_addr_bind(crx->handle.ur, &my_sa, NULL, 0));
+    crx->port = ntohs(my_sa.sin_port);
+    add_zocket(crx->handle);
+    break;
+#endif
   default:
     NT_ASSERT(0); /* ?? todo */
     break;
@@ -1646,6 +1902,10 @@ static int do_client(int argc, char* argv[])
     handle_type = HT_UNIX_S;
   else if( ! strcasecmp(handle_type_s, "unix_datagram") )
     handle_type = HT_UNIX_D;
+  else if( ! strcasecmp(handle_type_s, "zf_udp") )
+    handle_type = HT_ZF_UDP;
+  else if( ! strcasecmp(handle_type_s, "zf_tcp") )
+    handle_type = HT_ZF_TCP;
   else
     sfnt_fail_usage("unknown handle_type '%s'", handle_type_s);
 
@@ -1711,6 +1971,8 @@ static int do_client2(int ss, const char* hostport, int local)
   struct client_tx* ctx;
   unsigned char uc;
   int one = 1;
+  char host[strlen(hostport) + 1];
+  char* p;
 
   client_check_ver(ss);
 
@@ -1741,6 +2003,17 @@ static int do_client2(int ss, const char* hostport, int local)
   client_send_opts(ss);
   ctx = malloc(sizeof(*ctx));
   ctx->ss = ss;
+
+  strcpy(host, hostport);
+  if( (p = strchr(host, ':')) != NULL )
+    *p = '\0';
+
+#ifdef USE_ZF
+  /* Need to do this before starting the RX thread. */
+  if( handle_type == HT_ZF_UDP )
+    zf_udp_setup_addrs(ss);
+#endif
+
   ctx->crx = client_rx_thread_start();
 
   if( sfnt_ilist_parse(&ctx->rates, cfg_rates) != 0 )
@@ -1752,11 +2025,6 @@ static int do_client2(int ss, const char* hostport, int local)
   switch( handle_type ) {
   case HT_TCP: {
     int port = sfnt_sock_get_int(ss);
-    char host[strlen(hostport) + 1];
-    char* p;
-    strcpy(host, hostport);
-    if( (p = strchr(host, ':')) != NULL )
-      *p = '\0';
     NT_TRY2(ctx->read_handle.fd, socket(PF_INET, SOCK_STREAM, 0));
     if( cfg_nodelay )
       NT_TRY(setsockopt(ctx->read_handle.fd, SOL_TCP, TCP_NODELAY,
@@ -1782,11 +2050,6 @@ static int do_client2(int ss, const char* hostport, int local)
       NT_TRY(sfnt_connect(us, cfg_mcast, NULL, port));
     }
     else {
-      char host[strlen(hostport) + 1];
-      char* p;
-      strcpy(host, hostport);
-      if( (p = strchr(host, ':')) != NULL )
-        *p = '\0';
       NT_TRY(sfnt_connect(us, host, NULL, port));
     }
     NT_TRY(getsockname(us, (struct sockaddr*) &sin, &sin_len));
@@ -1809,10 +2072,34 @@ static int do_client2(int ss, const char* hostport, int local)
   case HT_UNIX_D:
     ctx->read_handle.fd = ctx->write_handle.fd = the_fds[0];
     break;
+#ifdef USE_ZF
+  case HT_ZF_UDP: {
+    int port = sfnt_sock_get_int(ss);
+    struct addrinfo *ai;
+    char reply_hostport[80];
+
+    NT_TEST(sfnt_getaddrinfo(host, NULL, port, &ai) == 0);
+    NT_TEST(ai->ai_addrlen == sizeof(struct sockaddr_in));
+    NT_TRY(zfut_alloc(&ctx->write_handle.ut, ztack_client_tx, &my_sa,
+                      (struct sockaddr_in*) ai->ai_addr, 0,
+                      zattr));
+    /* No RX here. */
+    ctx->read_handle.ur = NULL;
+
+    sprintf(reply_hostport, "%s:%d",
+            inet_ntoa(my_sa.sin_addr), ctx->crx->port);
+    sfnt_sock_put_str(ss, reply_hostport);
+    break;
+  }
+#endif
   default:
     NT_ASSERT(0);
   }
-  if( ctx->read_handle.fd >= 0 )
+  if( ctx->read_handle.fd >= 0
+#ifdef USE_ZF
+      && ! (handle_type & HTF_ZF)
+#endif
+    )
     add_fds(ctx->read_handle.fd);
 
   return do_client3(ctx);
