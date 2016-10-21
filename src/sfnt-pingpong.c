@@ -1318,7 +1318,7 @@ static void zf_tcp_accept(int ss, struct zft** zft_out)
   sa.sin_port = 11111;
 
   struct zftl* listener;
-  NT_TRY(zftl_listen(ztack, &sa, zattr, &listener));
+  NT_TRY(zftl_listen(ztack, (struct sockaddr*) &sa, sa_len, zattr, &listener));
 
   sfnt_sock_put_int(ss, ntohs(sa.sin_port));
 
@@ -1345,8 +1345,8 @@ static int zf_tcp_connect(int ss, struct zft_handle* th,
   NT_TRY(getsockname(ss, (struct sockaddr*) &sa, &sa_len));
   sa.sin_port = 11111;
 
-  NT_TRY(zft_addr_bind(th, &sa, 0));
-  NT_TRY(zft_connect(th, (const struct sockaddr_in*)ai->ai_addr, t_out));
+  NT_TRY(zft_addr_bind(th, (struct sockaddr*) &sa, sa_len, 0));
+  NT_TRY(zft_connect(th, ai->ai_addr, sa_len, t_out));
 
   /* Now wait for the connect to complete */
   struct epoll_event event = { .events = EPOLLOUT };
@@ -1561,8 +1561,12 @@ static int do_server2(int ss)
   case HT_ZF_UDP:
     zf_udp_setup_addrs(ss);
     NT_TRY(zfur_alloc(&read_handle.ur, ztack, zattr));
-    NT_TRY(zfur_addr_bind(read_handle.ur, &my_sa, &peer_sa, 0));
-    NT_TRY(zfut_alloc(&write_handle.ut, ztack, &my_sa, &peer_sa, 0, zattr));
+    NT_TRY(zfur_addr_bind(read_handle.ur,
+                          (struct sockaddr*) &my_sa, sizeof(my_sa),
+                          (struct sockaddr*) &peer_sa, sizeof(peer_sa), 0));
+    NT_TRY(zfut_alloc(&write_handle.ut, ztack,
+                      (struct sockaddr*) &my_sa, sizeof(my_sa),
+                      (struct sockaddr*) &peer_sa, sizeof(peer_sa), 0, zattr));
     break;
   case HT_ZF_TCP:
     if( cfg_bindtodev[0] || cfg_nodelay[0] ) {
@@ -1935,8 +1939,11 @@ static int do_client2(int ss, const char* hostport, int local)
   case HT_ZF_UDP:
     zf_udp_setup_addrs(ss);
     NT_TRY(zfur_alloc(&read_h.ur, ztack, zattr));
-    NT_TRY(zfur_addr_bind(read_h.ur, &my_sa, &peer_sa, 0));
-    NT_TRY(zfut_alloc(&write_h.ut, ztack, &my_sa, &peer_sa, 0, zattr));
+    NT_TRY(zfur_addr_bind(read_h.ur, (struct sockaddr*) &my_sa, sizeof(my_sa),
+                          (struct sockaddr*) &peer_sa, sizeof(peer_sa), 0));
+    NT_TRY(zfut_alloc(&write_h.ut, ztack,
+                      (struct sockaddr*) &my_sa, sizeof(my_sa),
+                      (struct sockaddr*) &peer_sa, sizeof(peer_sa), 0, zattr));
     break;
   case HT_ZF_TCP: {
     if( cfg_bindtodev[0] || cfg_nodelay[0] ) {

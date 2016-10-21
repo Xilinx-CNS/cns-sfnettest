@@ -1172,7 +1172,9 @@ static int do_server2(int ss)
   case HT_ZF_UDP:
     zf_udp_setup_addrs(ss);
     NT_TRY(zfur_alloc(&read_handle.ur, ztack, zattr));
-    NT_TRY(zfur_addr_bind(read_handle.ur, &my_sa, NULL, 0));
+    NT_TRY(zfur_addr_bind(read_handle.ur,
+                          (struct sockaddr*) &my_sa, sizeof(my_sa),
+                          NULL, 0, 0));
     sfnt_sock_put_int(ss, ntohs(my_sa.sin_port));
     break;
 #endif
@@ -1207,8 +1209,9 @@ static int do_server2(int ss)
 
 #ifdef USE_ZF
   if( handle_type == HT_ZF_UDP )
-    NT_TRY(zfut_alloc(&server.write_handle.ut, ztack, &my_sa,
-                      (struct sockaddr_in*) to_sa, 0, zattr));
+    NT_TRY(zfut_alloc(&server.write_handle.ut, ztack,
+                      (struct sockaddr*) &my_sa, sizeof(my_sa),
+                      to_sa, to_sa_len, 0, zattr));
 #endif
 
   return do_server3(&server);
@@ -1494,7 +1497,9 @@ static void* client_rx_thread(void* arg)
 #ifdef USE_ZF
   case HT_ZF_UDP:
     NT_TRY(zfur_alloc(&crx->handle.ur, ztack, zattr));
-    NT_TRY(zfur_addr_bind(crx->handle.ur, &my_sa, NULL, 0));
+    NT_TRY(zfur_addr_bind(crx->handle.ur,
+                          (struct sockaddr*) &my_sa, sizeof(my_sa),
+                          NULL, 0, 0));
     crx->port = ntohs(my_sa.sin_port);
     add_zocket(crx->handle);
     break;
@@ -2080,9 +2085,9 @@ static int do_client2(int ss, const char* hostport, int local)
 
     NT_TEST(sfnt_getaddrinfo(host, NULL, port, &ai) == 0);
     NT_TEST(ai->ai_addrlen == sizeof(struct sockaddr_in));
-    NT_TRY(zfut_alloc(&ctx->write_handle.ut, ztack_client_tx, &my_sa,
-                      (struct sockaddr_in*) ai->ai_addr, 0,
-                      zattr));
+    NT_TRY(zfut_alloc(&ctx->write_handle.ut, ztack_client_tx,
+                      (struct sockaddr*) &my_sa, sizeof(my_sa),
+                      ai->ai_addr, ai->ai_addrlen, 0, zattr));
     /* No RX here. */
     ctx->read_handle.ur = NULL;
 
