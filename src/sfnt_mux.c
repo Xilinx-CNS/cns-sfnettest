@@ -94,12 +94,15 @@ int sfnt_epolltype_wait(const union handle h, const enum handle_type h_type,
 		        enum sfnt_mux_flags flags)
 {
   int use_timeout_ms = (flags & NT_MUX_SPIN) ? 0 : timeout_ms;
+#if USE_ZF
+  int64_t use_timeout_ns = use_timeout_ms * 1000000;
+#endif
   uint64_t tsc_now, tsc_timeout;
   int rc;
 
 #if USE_ZF
   if( h_type & HTF_ZF )
-    rc = zf_muxer_wait(h.zf_mux, events, maxevents, use_timeout_ms);
+    rc = zf_muxer_wait(h.zf_mux, events, maxevents, use_timeout_ns);
   else
 #endif
     rc = epoll_wait(h.fd, events, maxevents, use_timeout_ms);
@@ -117,7 +120,7 @@ int sfnt_epolltype_wait(const union handle h, const enum handle_type h_type,
   while( 1 ) {
 #if USE_ZF
     if( h_type & HTF_ZF )
-      rc = zf_muxer_wait(h.zf_mux, events, maxevents, use_timeout_ms);
+      rc = zf_muxer_wait(h.zf_mux, events, maxevents, use_timeout_ns);
     else
 #endif
       rc = epoll_wait(h.fd, events, maxevents, use_timeout_ms);
