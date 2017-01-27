@@ -26,6 +26,7 @@ static int         cfg_minms = 1000;
 static int         cfg_maxms = 3000;
 static int         cfg_miniter = 1000;
 static int         cfg_maxiter = 1000000;
+static int         cfg_warmupiter = 1000000;
 static int         cfg_forkboth;
 static const char* cfg_mcast;
 static const char* cfg_mcast_intf[2];
@@ -83,6 +84,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1I("maxms",       cfg_maxms,       "max time per msg size (ms)"          ),
   CL1I("miniter",     cfg_miniter,     "min iterations for result"           ),
   CL1I("maxiter",     cfg_maxiter,     "max iterations for result"           ),
+  CL1I("warmupiter",  cfg_warmupiter,  "iterations for warmup"               ),
   CL1S("mcast",       cfg_mcast,       "set multicast address"               ),
   CL2S("mcastintf",   cfg_mcast_intf,  "set multicast interface"             ),
   CL2F("mcastloop",   cfg_mcast_loop,  "IP_MULTICAST_LOOP"                   ),
@@ -976,30 +978,56 @@ static void write_raw_results(int msg_size, int* results, int results_n)
 }
 
 
-static void do_test(int ss, int read_fd, int write_fd,
-                    int msg_size, int* results)
+static void run_test(int ss, int read_fd, int write_fd, int maxms, int minms,
+                     int maxiter, int miniter, int* results_n, int msg_size,
+                     int* results)
 {
-  int n_this_time = cfg_miniter;
+  int ms = 0;
+  int n_this_time = miniter;
   struct timeval start, end;
-  int ms, results_n = 0;
-  struct stats s;
 
   gettimeofday(&start, NULL);
 
   do {
-    if( results_n + n_this_time > cfg_maxiter )
-      n_this_time = cfg_maxiter - results_n;
+    if( *results_n + n_this_time > maxiter )
+      n_this_time = maxiter - *results_n;
 
     /* n_this_time can be 0 if minms not yet met */
     do_pings(ss, read_fd, write_fd, msg_size,
-             n_this_time, results + results_n);
-    results_n += n_this_time;
+             n_this_time, results + *results_n);
+    *results_n += n_this_time;
 
     gettimeofday(&end, NULL);
     ms = (end.tv_sec - start.tv_sec) * 1000;
     ms += (end.tv_usec - start.tv_usec) / 1000;
-  } while( (ms < cfg_maxms && results_n < cfg_maxiter) ||
-           (ms < cfg_minms || results_n < cfg_miniter) );
+  } while( (ms < maxms && *results_n < maxiter) ||
+           (ms < minms || *results_n < miniter) );
+}
+
+
+static void do_warmup(int ss, int read_fd, int write_fd)
+{
+  int results_n = 0;
+  int warmup_minms = 0;
+  int warmup_maxms = 5000;
+  int* results = malloc(cfg_warmupiter * sizeof(*results));
+  NT_TEST(results != NULL);
+
+  run_test(ss, read_fd, write_fd, warmup_maxms, warmup_minms, cfg_warmupiter,
+           cfg_warmupiter, &results_n, 1, results);
+
+  free(results);
+}
+
+
+static void do_test(int ss, int read_fd, int write_fd,
+                    int msg_size, int* results)
+{
+  int results_n = 0;
+  struct stats s;
+
+  run_test(ss, read_fd, write_fd, cfg_maxms, cfg_minms, cfg_maxiter,
+           cfg_miniter, &results_n, msg_size, results);
 
   if( cfg_raw != NULL )
     write_raw_results(msg_size, results, results_n);
@@ -1248,11 +1276,14 @@ static int do_client2(int ss, const char* hostport, int local)
       sfnt_ilist_append(&msg_sizes, msg_size);
   }
 
+  do_warmup(ss, read_fd, write_fd);
   for( i = 0; i < msg_sizes.len; ++i )
     do_test(ss, read_fd, write_fd, msg_sizes.list[i], results);
 
   /* Tell server side to exit. */
   sfnt_sock_put_int(ss, 0);
+
+  free(results);
 
   return 0;
 }
