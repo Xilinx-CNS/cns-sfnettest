@@ -26,7 +26,8 @@ static int         cfg_minms = 1000;
 static int         cfg_maxms = 3000;
 static int         cfg_miniter = 1000;
 static int         cfg_maxiter = 1000000;
-static int         cfg_warmupiter = 1000000;
+static int         cfg_warmupiter = 10000;
+static int         cfg_warmupms = 500;
 static int         cfg_forkboth;
 static const char* cfg_mcast;
 static const char* cfg_mcast_intf[2];
@@ -85,6 +86,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1I("miniter",     cfg_miniter,     "min iterations for result"           ),
   CL1I("maxiter",     cfg_maxiter,     "max iterations for result"           ),
   CL1I("warmupiter",  cfg_warmupiter,  "iterations for warmup"               ),
+  CL1I("warmupms",    cfg_warmupms,    "time for warmup"                     ),
   CL1S("mcast",       cfg_mcast,       "set multicast address"               ),
   CL2S("mcastintf",   cfg_mcast_intf,  "set multicast interface"             ),
   CL2F("mcastloop",   cfg_mcast_loop,  "IP_MULTICAST_LOOP"                   ),
@@ -1009,11 +1011,10 @@ static void do_warmup(int ss, int read_fd, int write_fd)
 {
   int results_n = 0;
   int warmup_minms = 0;
-  int warmup_maxms = 5000;
   int* results = malloc(cfg_warmupiter * sizeof(*results));
   NT_TEST(results != NULL);
 
-  run_test(ss, read_fd, write_fd, warmup_maxms, warmup_minms, cfg_warmupiter,
+  run_test(ss, read_fd, write_fd, cfg_warmupms, warmup_minms, cfg_warmupiter,
            cfg_warmupiter, &results_n, 1, results);
 
   free(results);
