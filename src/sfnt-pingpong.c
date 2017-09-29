@@ -85,8 +85,8 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1I("maxms",       cfg_maxms,       "max time per msg size (ms)"          ),
   CL1I("miniter",     cfg_miniter,     "min iterations for result"           ),
   CL1I("maxiter",     cfg_maxiter,     "max iterations for result"           ),
-  CL1I("warmupiter",  cfg_warmupiter,  "iterations for warmup"               ),
-  CL1I("warmupms",    cfg_warmupms,    "time for warmup"                     ),
+  CL1I("warmupiter",  cfg_warmupiter,  "min iterations for warmup"           ),
+  CL1I("warmupms",    cfg_warmupms,    "min time for warmup"                 ),
   CL1S("mcast",       cfg_mcast,       "set multicast address"               ),
   CL2S("mcastintf",   cfg_mcast_intf,  "set multicast interface"             ),
   CL2F("mcastloop",   cfg_mcast_loop,  "IP_MULTICAST_LOOP"                   ),
@@ -1010,11 +1010,24 @@ static void run_test(int ss, int read_fd, int write_fd, int maxms, int minms,
 static void do_warmup(int ss, int read_fd, int write_fd)
 {
   int results_n = 0;
-  int warmup_minms = 0;
-  int* results = malloc(cfg_warmupiter * sizeof(*results));
+  int* results;
+
+  /* If the requested warmup timeout is large with respect to the number of
+   * warmup iterations, the warmup would sit doing nothing after the requested
+   * number of iterations elapsed, which is unhelpful.  Ideally we would like
+   * to allow an unbounded number of iterations up to the timeout, but we have
+   * to provide some storage for each iteration, so we synthesise a bound. */
+  const int MIN_RESOLUTION_NS = 50;
+  int maxiter = cfg_warmupms * (1000000 / MIN_RESOLUTION_NS);
+  if( cfg_warmupiter > maxiter )
+    maxiter = cfg_warmupiter;
+
+  results = malloc(maxiter * sizeof(*results));
   NT_TEST(results != NULL);
 
-  run_test(ss, read_fd, write_fd, cfg_warmupms, warmup_minms, cfg_warmupiter,
+  /* Run for at least cfg_warmupms milliseconds and at least cfg_warmupiter
+   * iterations. */
+  run_test(ss, read_fd, write_fd, cfg_warmupms, cfg_warmupms, maxiter,
            cfg_warmupiter, &results_n, 1, results);
 
   free(results);
