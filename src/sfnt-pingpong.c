@@ -18,6 +18,21 @@
 #include <zf/zf.h>
 #endif
 
+#ifdef USE_DPDK
+#include <stdint.h>
+#include <inttypes.h>
+#include <rte_eal.h>
+#include <rte_ethdev.h>
+#include <rte_cycles.h>
+#include <rte_lcore.h>
+#include <rte_mbuf.h>
+#include <rte_ip.h>
+#include <limits.h>
+#include <sys/time.h>
+#include <getopt.h>
+#include <rte_net.h>
+#endif
+
 static int         cfg_port = 2048;
 static int         cfg_connect[2];
 static const char* cfg_sizes;
@@ -181,6 +196,28 @@ static int                 epoll_fd;
 static struct zf_muxer_set* zf_mux;
 static struct zf_attr* zattr;
 static struct zf_stack* ztack;
+#endif
+
+#ifdef USE_DPDK
+#define RX_RING_SIZE 512
+#define TX_RING_SIZE 512
+
+#define NUM_MBUFS 1023
+#define MBUF_CACHE_SIZE 250
+
+#define IP_VERSION 0x40
+#define IP_HDRLEN  0x05 /* default IP header length == five 32-bits words. */
+#define IP_DEFTTL  64   /* from RFC 1340. */
+#define IP_VHL_DEF (IP_VERSION | IP_HDRLEN)
+#define IP_DN_FRAGMENT_FLAG 0x0040
+
+struct rte_mempool *dpdk_mbuf_pool;
+
+static const struct rte_eth_conf port_conf_default = {
+  .rxmode = { .max_rx_pkt_len = ETHER_MAX_LEN }
+};
+
+static uint16_t dpdk_num_tx=0;
 #endif
 
 static ssize_t (*do_recv)(union handle, void*, size_t, int);
@@ -359,6 +396,135 @@ static ssize_t sfn_zft_send(union handle h, const void* buf, size_t len,
 
   int rc = zft_send(h.t, &siov, 1, 0);
   return rc == 0 ? len : rc;
+}
+#endif
+
+#ifdef USE_DPDK
+/* currently this is non blocking. Wrap with rfn_dpdk_recv to spin */
+static ssize_t _rfn_dpdk_recv(union handle h, void* buf, size_t len, int flags)
+{
+  unsigned num_rx = 0;
+  struct rte_mbuf* m;
+  struct rte_net_hdr_lens hdr_lens;
+  struct udp_hdr* udp;
+  char* payload;
+  int paylen;
+
+  num_rx = rte_eth_rx_burst(0, 0, &m, 1);
+
+  if( likely(num_rx == 0) )
+    return -EAGAIN;
+
+  uint32_t ptype = rte_net_get_ptype(m, &hdr_lens, RTE_PTYPE_ALL_MASK);
+  switch( ptype & RTE_PTYPE_L4_MASK ) {
+  case RTE_PTYPE_L4_UDP:
+    udp = (struct udp_hdr*)( rte_pktmbuf_mtod(m, char*)
+                             + hdr_lens.l2_len + hdr_lens.l3_len );
+    payload = (char*)( udp +1 );
+    /* NB network byte order. Also dgram_len includes UDP header */
+    paylen = ntohs(udp->dgram_len) - hdr_lens.l4_len;
+    if( (udp->src_port != peer_sa.sin_port) ||
+        (udp->dst_port != my_sa.sin_port) ) {
+      rte_pktmbuf_free(m);
+      return -EAGAIN;
+    }
+    if( paylen != len ) {
+      printf("Payload length %d does not match requested length %zd\n",
+             paylen, len);
+      exit(0);
+    }
+    rte_memcpy(buf, payload, paylen);
+    rte_pktmbuf_free(m);
+    return paylen;
+    break;
+
+  default:
+    rte_pktmbuf_free(m);
+    return -EAGAIN;
+  }
+}
+
+
+static ssize_t rfn_dpdk_recv(union handle h, void* buf, size_t len, int flags)
+{
+  int rc, got = 0, all = flags & MSG_WAITALL;
+  flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
+  do {
+    while( (rc = _rfn_dpdk_recv(h, (char*) buf + got, len - got, flags)) < 0 )
+      if( rc != -EAGAIN )
+        goto out;
+    got += rc;
+  } while( all && got < len && rc > 0 );
+ out:
+  return got ? got : rc;
+}
+
+
+/* Use a broadcast destination MAC for now*/
+static const struct ether_addr ether_multicast = {
+  .addr_bytes = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
+};
+static void
+fill_udp_pkt(struct rte_mbuf *m, int paylen, uint16_t n, const char* data)
+{
+  int ip_len = sizeof(struct ipv4_hdr) + sizeof(struct udp_hdr) + paylen;
+  int tx_frame_len = sizeof(struct ether_hdr) + ip_len;
+  struct ether_hdr* eth;
+  struct ipv4_hdr* ip4;
+  struct udp_hdr* udp;
+  char* payload;
+
+  eth = rte_pktmbuf_mtod(m, struct ether_hdr *);
+  ip4 = (struct ipv4_hdr*)((char*) eth +
+                           sizeof(struct ether_hdr));
+  udp = (struct udp_hdr*)((void*) (ip4 + 1));
+  payload = (char*) (udp +1);
+
+  /* Fill in ethernet */
+  ether_addr_copy(&ether_multicast, &eth->d_addr);
+  rte_eth_macaddr_get(0, &eth->s_addr);
+  eth->ether_type = htons(0x0800);
+
+  /* Fill in IP */
+  ip4->version_ihl = IP_VHL_DEF;
+  ip4->type_of_service = 0;
+  ip4->total_length = htons(ip_len);
+  ip4->packet_id = htons(n);
+  ip4->fragment_offset = IP_DN_FRAGMENT_FLAG;
+  ip4->time_to_live = IP_DEFTTL;
+  ip4->next_proto_id = IPPROTO_UDP;
+  ip4->hdr_checksum = 0;
+  ip4->src_addr = my_sa.sin_addr.s_addr;
+  ip4->dst_addr = peer_sa.sin_addr.s_addr;
+
+  /* Fill in UDP */
+  udp->src_port = my_sa.sin_port;
+  udp->dst_port = peer_sa.sin_port;
+  udp->dgram_len = htons(paylen + sizeof(struct udp_hdr));
+  udp->dgram_cksum = 0;
+
+  /* fill in payload */
+  rte_memcpy(payload, data, paylen);
+
+  /* book-keeping */
+  m->data_len = tx_frame_len;
+  m->pkt_len = tx_frame_len;
+}
+
+
+static ssize_t sfn_dpdk_send(union handle h, const void* buf, size_t len,
+                            int flags)
+{
+  struct rte_mbuf *m;
+  /* Currently doesn't support Jumbos */
+  NT_ASSERT(len <= 1472);
+
+  m = rte_pktmbuf_alloc(dpdk_mbuf_pool);
+  fill_udp_pkt(m, len, dpdk_num_tx, buf);
+  NT_TESTi3(rte_eth_tx_burst(0, 0, &m, 1), ==, 1);
+  dpdk_num_tx++;
+
+  return len;
 }
 #endif
 
@@ -915,10 +1081,96 @@ static void do_zf_init(void)
 #endif
 
 
+#ifdef USE_DPDK
+static inline int
+dpdk_port_init(struct rte_mempool *mbuf_pool)
+{
+  uint8_t port = 0;
+  struct rte_eth_dev_info dev_info;
+  struct rte_eth_conf port_conf = port_conf_default;
+  const uint16_t rx_rings = 1;
+  const uint16_t tx_rings = 1;
+  uint16_t q;
+  uint16_t nb_rxd = RX_RING_SIZE;
+  uint16_t nb_txd = TX_RING_SIZE;
+
+  if (port >= rte_eth_dev_count())
+    return -1;
+
+  /* Configure the Ethernet device. */
+  NT_TESTi3(rte_eth_dev_configure(port, rx_rings, tx_rings, &port_conf), ==, 0);
+
+  NT_TESTi3(rte_eth_dev_adjust_nb_rx_tx_desc(port, &nb_rxd, &nb_txd), ==, 0);
+
+  /* Allocate and set up 1 RX queue per Ethernet port. */
+  for (q = 0; q < rx_rings; q++) {
+    NT_TESTi3(rte_eth_rx_queue_setup(port, q, nb_rxd, rte_eth_dev_socket_id(port), NULL, mbuf_pool), ==, 0);
+  }
+
+  /* Allocate and set up 1 TX queue per Ethernet port. */
+  for (q = 0; q < tx_rings; q++) {
+    /* Setup txq_flags */
+    struct rte_eth_txconf *txconf;
+
+    rte_eth_dev_info_get(q, &dev_info);
+    txconf = &dev_info.default_txconf;
+
+    NT_TRY(rte_eth_tx_queue_setup(port, q, nb_txd, rte_eth_dev_socket_id(port), txconf));
+  }
+
+  /* Start the Ethernet port. */
+  NT_TRY(rte_eth_dev_start(port));
+
+  /* Enable RX in promiscuous mode for the Ethernet device. */
+  rte_eth_promiscuous_enable(port);
+
+  return 0;
+}
+
+
+static void do_dpdk_init(int core)
+{
+  char* argv[10] = { "dummy", "--proc-type=auto", "-l1", NULL };
+  int argc = 3;
+  char set_core[30];
+
+  sprintf(set_core, "-l%d", core);
+  argv[2] = set_core;
+
+  fprintf(stderr, "Initialising EAL\n");
+  int rc = rte_eal_init(argc, argv);
+  if (rc < 0) {
+    rte_exit(EXIT_FAILURE, "Failed to initialise EAL (%s)\n", rte_strerror(-rc));
+  }
+  fprintf(stderr, "Initialised EAL\n");
+
+  int num_ports = rte_eth_dev_count();
+  if( num_ports < 1 )
+    rte_exit(EXIT_FAILURE, "Requires at least one interface bound to DPDK\n");
+  if( num_ports > 1 )
+    fprintf(stderr,
+            "Multiple interfaces bound to DPDK - only using first one\n");
+
+  dpdk_mbuf_pool = rte_pktmbuf_pool_create("POOL",
+                                           NUM_MBUFS,
+                                           MBUF_CACHE_SIZE,
+                                           0,
+                                           RTE_MBUF_DEFAULT_BUF_SIZE,
+                                           rte_socket_id());
+
+  if( dpdk_mbuf_pool == NULL )
+    rte_exit(EXIT_FAILURE, "Unable to create mbuf pool - %s\n",
+             rte_strerror(rte_errno));
+
+  NT_TESTi3(dpdk_port_init(dpdk_mbuf_pool), ==, 0);
+}
+#endif
+
+
 static void do_init(void)
 {
   const char* muxer = cfg_muxer[0];
-  unsigned core_i;
+  unsigned core_i = 1;
 
   if( cfg_tmpl_send[0] != -1 && cfg_tmpl_send[0] > 100 ) {
     sfnt_err("ERROR: Amount of templated send to update(%d) more than 100%%\n",
@@ -927,13 +1179,16 @@ static void do_init(void)
   }
 
   /* Set affinity first to ensure optimal locality. */
+
   if( strcasecmp(cfg_affinity[0], "any") )
     if( sscanf(cfg_affinity[0], "%u", &core_i) == 1 )
-      if( sfnt_cpu_affinity_set(core_i) != 0 ) {
-        sfnt_err("ERROR: Failed to set CPU affinity to core %d (%d %s)\n",
-                 core_i, errno, strerror(errno));
-        sfnt_fail_setup();
-      }
+      if( ! (handle_type & HTF_DPDK) )
+        if( sfnt_cpu_affinity_set(core_i) != 0 ) {
+          sfnt_err("ERROR: Failed to set CPU affinity to core %d (%d %s)\n",
+                   core_i, errno, strerror(errno));
+          sfnt_fail_setup();
+        }
+
 
   NT_TRY(sfnt_tsc_get_params(&tsc));
 
@@ -993,6 +1248,29 @@ static void do_init(void)
     do_zf_init();
   }
 #endif
+
+#ifdef USE_DPDK
+  else if (handle_type & HTF_DPDK ) {
+    if( cfg_tmpl_send[0] != -1 ) {
+      sfnt_err("ERROR: templated sends not supported for DPDK\n");
+      sfnt_fail_setup();
+    }
+    if( cfg_warm[0] != 0 ) {
+      sfnt_err("ERROR: MSG_WARM not supported for DPDK\n");
+      sfnt_fail_setup();
+    }
+    if( cfg_zc[0] ) {
+      sfnt_err("ERROR: Onload zero copy not supported for DPDK\n");
+      sfnt_fail_setup();
+    }
+
+    NT_ASSERT(handle_type == HT_DPDK_UDP);
+    do_recv = rfn_dpdk_recv;
+    do_send = sfn_dpdk_send;
+    do_dpdk_init(core_i);
+  }
+#endif
+
   else {
     do_recv = rfn_read;
     do_send = sfn_write;
@@ -1024,6 +1302,18 @@ static void do_init(void)
     NT_ASSERT(0);
 #endif
   }
+#ifdef USE_DPDK
+  else if( handle_type & HTF_DPDK ) {
+    if( muxer == NULL || ! strcmp(muxer, "") || ! strcasecmp(muxer, "none") ) {
+      mux_recv = cfg_spin[0] ? spin_recv : do_recv;
+      mux_add = noop_add;
+    }
+    else {
+      sfnt_err("ERROR: Muxer not supported for DPDK\n");
+      sfnt_fail_setup();
+    }
+  }
+#endif
   else {
     if( muxer == NULL || ! strcmp(muxer, "") || ! strcasecmp(muxer, "none") ) {
       if( cfg_warm[0] ) 
@@ -1366,6 +1656,36 @@ static int zf_tcp_connect(int ss, struct zft_handle* th,
 #endif
 
 
+#ifdef USE_DPDK
+static void dpdk_udp_setup_addrs(int ss)
+{
+  struct addrinfo* ai;
+  struct sockaddr_in* sa;
+  int rc;
+  NT_TEST( cfg_bind[0] );
+  if( (rc = sfnt_getaddrinfo(cfg_bind[0], NULL, -1, &ai)) != 0 ) {
+    sfnt_err("ERROR: Could not bind to '%s'\n", cfg_bind[0]);
+    sfnt_err("ERROR: rc=%d errno=(%d %s) gai_strerror=(%s)\n",
+             rc, errno, strerror(errno), gai_strerror(rc));
+    sfnt_fail_setup();
+  }
+
+  NT_TEST( ai->ai_family == AF_INET );
+  sa = ((struct sockaddr_in*)ai->ai_addr);
+  my_sa.sin_family = AF_INET;
+  my_sa.sin_addr.s_addr = sa->sin_addr.s_addr;
+  my_sa.sin_port = sa->sin_port ? sa->sin_port : htons(11111);
+
+  /* Tell client our address, and get their's. */
+  sfnt_sock_put_sockaddr_in(ss, &my_sa);
+  sfnt_sock_get_sockaddr_in(ss, &peer_sa);
+
+  to_sa = (struct sockaddr*) &peer_sa;
+  to_sa_len = sizeof(peer_sa);
+}
+#endif
+
+
 static void udp_bind_sock(int us, int ss)
 {
   struct sockaddr_in ss_sa;
@@ -1579,6 +1899,11 @@ static int do_server2(int ss)
     write_handle.t = read_handle.t;
     break;
 #endif
+#ifdef USE_DPDK
+  case HT_DPDK_UDP:
+    dpdk_udp_setup_addrs(ss);
+    break;
+#endif
   default:
     NT_ASSERT(0);
   }
@@ -1593,6 +1918,10 @@ static int do_server2(int ss)
     add_fds(read_handle.fd);
 
   do_zc_init(write_handle.fd);
+
+
+  printf("Server ready to start - informing client\n");
+  sfnt_sock_put_int(ss,42);
 
   while( 1 ) {
     iter = sfnt_sock_get_int(ss);
@@ -1808,6 +2137,8 @@ static int do_client(int argc, char* argv[])
     handle_type = HT_ZF_UDP;
   else if( ! strcasecmp(handle_type_s, "zf_tcp") )
     handle_type = HT_ZF_TCP;
+  else if( ! strcasecmp(handle_type_s, "dpdk_udp") )
+    handle_type = HT_DPDK_UDP;
   else
     sfnt_fail_usage("unknown handle_type '%s'", handle_type_s);
 
@@ -1966,6 +2297,12 @@ static int do_client2(int ss, const char* hostport, int local)
     break;
   }
 #endif
+#ifdef USE_DPDK
+  case HT_DPDK_UDP: {
+    dpdk_udp_setup_addrs(ss);
+    break;
+  }
+#endif
   default:
     NT_ASSERT(0);
   }
@@ -1998,6 +2335,10 @@ static int do_client2(int ss, const char* hostport, int local)
     if( cfg_maxmsg == 0 )
       cfg_maxmsg = 64 * 1024;
   }
+  else if( handle_type & HTF_DPDK ) {
+    if( cfg_maxmsg == 0 )
+      cfg_maxmsg = 1472;
+  }
   else {
     if( cfg_maxmsg == 0 )
       cfg_maxmsg = 32 * 1024;
@@ -2014,6 +2355,9 @@ static int do_client2(int ss, const char* hostport, int local)
       sfnt_ilist_append(&msg_sizes, msg_size);
   }
 
+  /* Client side ready - will start after signal from server */
+  i = sfnt_sock_get_int(ss);
+
   for( i = 0; i < msg_sizes.len; ++i )
     do_test(ss, read_h, write_h, msg_sizes.list[i], results);
 
@@ -2029,8 +2373,8 @@ int main(int argc, char* argv[])
   pid_t pid = 0;
   int rc = 0;
 
-  sfnt_app_getopt("[tcp|udp|pipe|unix_stream|unix_datagram|zf_udp|zf_tcp "
-                  "[host[:port]]]",
+  sfnt_app_getopt("[tcp|udp|pipe|unix_stream|unix_datagram|zf_udp|zf_tcp|"
+                  "dpdk_udp [host[:port]]]",
                 &argc, argv, cfg_opts, N_CFG_OPTS);
   --argc; ++argv;
 

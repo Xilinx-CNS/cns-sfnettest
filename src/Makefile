@@ -93,10 +93,48 @@ LINK_ONLOAD_EXT	:= \
 LINK_ONLOAD_ZF	:= \
 	-L$(ONLOAD_TREE)/build/$(shell mmaketool --userbuild)/lib/zf \
 	-Wl,-rpath,$(ONLOAD_TREE)/build/$(shell mmaketool --userbuild)/lib/zf
-sfnt-pingpong.o: CPPFLAGS += -I$(ONLOAD_TREE)/src/include
+
+ifdef USE_DPDK
+ifeq ($(RTE_SDK),)
+$(error RTE_SDK not set. Please refer to the DPDK documentation.)
+endif
+ifeq ($(RTE_TARGET),)
+$(error RTE_TARGET not set. Please refer to the DPDK documentation.)
+endif
+DPDK_CFLAGS = \
+  -march=native -DRTE_MACHINE_CPUFLAG_SSE -DRTE_MACHINE_CPUFLAG_SSE2 \
+  -DRTE_MACHINE_CPUFLAG_SSE3 -DRTE_MACHINE_CPUFLAG_SSSE3 \
+  -DRTE_MACHINE_CPUFLAG_AES -DRTE_MACHINE_CPUFLAG_PCLMULQDQ \
+  -DRTE_MACHINE_CPUFLAG_AVX -DRTE_MACHINE_CPUFLAG_RDRAND \
+  -DRTE_MACHINE_CPUFLAG_FSGSBASE -DRTE_MACHINE_CPUFLAG_F16C \
+  -I$(RTE_SDK)/$(RTE_TARGET)/include \
+  -include $(RTE_SDK)/$(RTE_TARGET)/include/rte_config.h \
+  -pthread
+CPPFLAGS        += -DUSE_DPDK -ggdb -mssse3
+LINK_DPDK = \
+  -L$(RTE_SDK)/$(RTE_TARGET)/lib -pthread\
+  -Wl,--whole-archive \
+  -lrte_mbuf \
+  -lrte_ethdev \
+  -lrte_mempool \
+  -lrte_mempool_stack \
+  -lrte_mempool_ring \
+  -lrte_ring \
+  -lrte_pmd_i40e \
+  -lrte_pmd_ring \
+  -lrte_pmd_sfc_efx \
+  -lrte_eal \
+  -lrte_kvargs \
+  -Wl,--no-whole-archive \
+  -ldl \
+  -ldpdk \
+  -lnuma
+endif
+
+sfnt-pingpong.o: CPPFLAGS += -I$(ONLOAD_TREE)/src/include $(DPDK_CFLAGS)
 sfnt-stream.o:   CPPFLAGS += -I$(ONLOAD_TREE)/src/include
 sfnt_mux.o:      CPPFLAGS += -I$(ONLOAD_TREE)/src/include
-sfnt-pingpong: LIBS := $(LINK_ONLOAD_EXT) $(LINK_ONLOAD_ZF) $(LIBS)
+sfnt-pingpong: LIBS := $(LINK_ONLOAD_EXT) $(LINK_ONLOAD_ZF) $(LIBS) $(LINK_DPDK)
 sfnt-stream:   LIBS := $(LINK_ONLOAD_EXT) $(LINK_ONLOAD_ZF) $(LIBS)
 endif
 

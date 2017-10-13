@@ -213,6 +213,7 @@ enum handle_type_flags {
   HTF_STREAM = 0x400,
   HTF_ZF     = 0x800,
   HTF_MUX    = 0x1000,
+  HTF_DPDK   = 0x2000,
 };
 
 
@@ -226,6 +227,7 @@ enum handle_type {
   HT_ZF_TCP  = 6 | 0          | 0         | HTF_STREAM | HTF_ZF | 0,
   HT_ZF_MUX  = 7 | 0          | 0         | 0          | HTF_ZF | HTF_MUX,
   HT_EPOLL   = 8 | 0          | 0         | 0          | 0      | HTF_MUX,
+  HT_DPDK_UDP = 9 | 0         | 0         | 0          | HTF_DPDK | 0,
 };
 
 /**********************************************************************
