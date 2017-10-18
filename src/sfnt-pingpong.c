@@ -1920,7 +1920,7 @@ static int do_server2(int ss)
   do_zc_init(write_handle.fd);
 
 
-  printf("Server ready to start - informing client\n");
+  sfnt_err("%s: server: server ready to start - informing client \n", sfnt_app_name);
   sfnt_sock_put_int(ss,42);
 
   while( 1 ) {
