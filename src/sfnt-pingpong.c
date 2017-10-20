@@ -72,6 +72,7 @@ static unsigned    cfg_spin_gap = 0;
 static int         cfg_zc[2];
 static unsigned    cfg_warm[2];
 static int         cfg_tmpl_send[2] = {-1, -1};
+static const char* cfg_server_type;
 
 /* CL1* implies that the cmdline args are the same for both client and
  * server.  CL2* implies that different options can be specified for
@@ -129,6 +130,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL2F("zerocopy",    cfg_zc,          "Use Zero Copy API for TCP tx and UDP rx"),
   CL2U("warm",        cfg_warm,        "Use MSG_WARM in usecs gap (must be < spin-gap)"),
   CL2I("template",    cfg_tmpl_send,   "Use templated_sends and update thispercentage of bytes"),
+  CL1S("server-type", cfg_server_type,  "Use different variant for server [udp|zf_udp|dpdk_udp]"),
 };
 
 
@@ -165,6 +167,7 @@ static struct iovec zc_iov;
 struct onload_zc_recv_args zc_args;
 
 static enum handle_type handle_type;
+static enum handle_type remote_handle_type;
 static int              the_fds[4];  /* used for pipes and unix sockets */
 
 static fd_set           select_fdset;
@@ -1276,10 +1279,20 @@ static void do_init(void)
     do_send = sfn_write;
   }
 
+  /* Different set of muxers are supported by each endpoint type, so at
+   * present only common option is "none"
+   */
+  if( (remote_handle_type != 0) && (remote_handle_type != handle_type) ) {
+    if( ! (muxer == NULL || ! strcmp(muxer, "")
+           || ! strcasecmp(muxer, "none")) ) {
+      sfnt_err("ERROR: Muxer not supported when using --server-type\n");
+      sfnt_fail_setup();
+    }
+  }
   /* If we're using the direct zockets API we must use an appropriate muxer
    * type, so check mux separately in that case.
    */
-  if( handle_type & HTF_ZF ) {
+  if( (handle_type & HTF_ZF) || (remote_handle_type & HTF_ZF) ) {
 #ifdef USE_ZF
     if( muxer == NULL || ! strcmp(muxer, "") || ! strcasecmp(muxer, "none") ) {
       mux_recv = cfg_spin[0] ? spin_recv : do_recv;
@@ -1302,8 +1315,8 @@ static void do_init(void)
     NT_ASSERT(0);
 #endif
   }
+  else if( (handle_type & HTF_DPDK) || (remote_handle_type & HTF_DPDK) ) {
 #ifdef USE_DPDK
-  else if( handle_type & HTF_DPDK ) {
     if( muxer == NULL || ! strcmp(muxer, "") || ! strcasecmp(muxer, "none") ) {
       mux_recv = cfg_spin[0] ? spin_recv : do_recv;
       mux_add = noop_add;
@@ -1312,8 +1325,11 @@ static void do_init(void)
       sfnt_err("ERROR: Muxer not supported for DPDK\n");
       sfnt_fail_setup();
     }
-  }
+#else
+  /* Shouldn't be using DPDK if we're not built with it */
+  NT_ASSERT(0);
 #endif
+  }
   else {
     if( muxer == NULL || ! strcmp(muxer, "") || ! strcasecmp(muxer, "none") ) {
       if( cfg_warm[0] ) 
@@ -1522,7 +1538,7 @@ static void server_check_ver(int ss)
 
 static void client_send_opts(int ss)
 {
-  sfnt_sock_put_int(ss, handle_type);
+  sfnt_sock_put_int(ss, remote_handle_type);
   sfnt_sock_put_int(ss, cfg_connect[1]);
   sfnt_sock_put_int(ss, cfg_spin[1]);
   sfnt_sock_put_str(ss, cfg_muxer[1]);
@@ -2111,36 +2127,60 @@ static int try_connect(const char* hostport, int default_port)
 }
 
 
+static enum handle_type handle_from_string(const char* handle_type_s)
+{
+  static enum handle_type ht;
+  if( ! strcasecmp(handle_type_s, "tcp") )
+    ht = HT_TCP;
+  else if( ! strcasecmp(handle_type_s, "udp") )
+    ht = HT_UDP;
+  else if( ! strcasecmp(handle_type_s, "pipe") )
+    ht = HT_PIPE;
+  else if( ! strcasecmp(handle_type_s, "unix_stream") )
+    ht = HT_UNIX_S;
+  else if( ! strcasecmp(handle_type_s, "unix_datagram") )
+    ht = HT_UNIX_D;
+  else if( ! strcasecmp(handle_type_s, "zf_udp") )
+    ht = HT_ZF_UDP;
+  else if( ! strcasecmp(handle_type_s, "zf_tcp") )
+    ht = HT_ZF_TCP;
+  else if( ! strcasecmp(handle_type_s, "dpdk_udp") )
+    ht = HT_DPDK_UDP;
+  else
+    sfnt_fail_usage("unknown handle_type '%s'", handle_type_s);
+
+ return ht;
+}
+
 static int do_client2(int ss, const char* hostport, int local);
 
 
 static int do_client(int argc, char* argv[])
 {
   const char* hostport;
-  const char* handle_type_s;
   pid_t pid;
 
   if( argc < 1 || argc > 2 )
     sfnt_fail_usage("wrong number of arguments");
-  handle_type_s = argv[0];
-  if( ! strcasecmp(handle_type_s, "tcp") )
-    handle_type = HT_TCP;
-  else if( ! strcasecmp(handle_type_s, "udp") )
-    handle_type = HT_UDP;
-  else if( ! strcasecmp(handle_type_s, "pipe") )
-    handle_type = HT_PIPE;
-  else if( ! strcasecmp(handle_type_s, "unix_stream") )
-    handle_type = HT_UNIX_S;
-  else if( ! strcasecmp(handle_type_s, "unix_datagram") )
-    handle_type = HT_UNIX_D;
-  else if( ! strcasecmp(handle_type_s, "zf_udp") )
-    handle_type = HT_ZF_UDP;
-  else if( ! strcasecmp(handle_type_s, "zf_tcp") )
-    handle_type = HT_ZF_TCP;
-  else if( ! strcasecmp(handle_type_s, "dpdk_udp") )
-    handle_type = HT_DPDK_UDP;
-  else
-    sfnt_fail_usage("unknown handle_type '%s'", handle_type_s);
+
+  handle_type = handle_from_string( argv[0] );
+  remote_handle_type = handle_type; /* default */
+
+  if( cfg_server_type ) {
+
+    if( (handle_type != HT_UDP) &&
+        (handle_type != HT_ZF_UDP) &&
+        (handle_type != HT_DPDK_UDP) )
+      sfnt_fail_usage("--server-type only supported for udp connections");
+
+    remote_handle_type = handle_from_string(cfg_server_type);
+
+    if( (remote_handle_type != HT_UDP) &&
+        (remote_handle_type != HT_ZF_UDP) &&
+        (remote_handle_type != HT_DPDK_UDP) )
+      sfnt_fail_usage("--server-type must be a udp variant");
+  }
+
 
   if( handle_type & HTF_LOCAL ) {
     int ss[2];
@@ -2335,7 +2375,7 @@ static int do_client2(int ss, const char* hostport, int local)
     if( cfg_maxmsg == 0 )
       cfg_maxmsg = 64 * 1024;
   }
-  else if( handle_type & HTF_DPDK ) {
+  else if( (handle_type & HTF_DPDK) || (remote_handle_type & HTF_DPDK) ) {
     if( cfg_maxmsg == 0 )
       cfg_maxmsg = 1472;
   }
