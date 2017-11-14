@@ -1097,7 +1097,7 @@ dpdk_port_init(struct rte_mempool *mbuf_pool)
   uint16_t nb_rxd = RX_RING_SIZE;
   uint16_t nb_txd = TX_RING_SIZE;
 
-  if (port >= rte_eth_dev_count())
+  if( port >= rte_eth_dev_count() )
     return -1;
 
   /* Configure the Ethernet device. */
@@ -1106,12 +1106,12 @@ dpdk_port_init(struct rte_mempool *mbuf_pool)
   NT_TESTi3(rte_eth_dev_adjust_nb_rx_tx_desc(port, &nb_rxd, &nb_txd), ==, 0);
 
   /* Allocate and set up 1 RX queue per Ethernet port. */
-  for (q = 0; q < rx_rings; q++) {
+  for( q = 0; q < rx_rings; q++ ) {
     NT_TESTi3(rte_eth_rx_queue_setup(port, q, nb_rxd, rte_eth_dev_socket_id(port), NULL, mbuf_pool), ==, 0);
   }
 
   /* Allocate and set up 1 TX queue per Ethernet port. */
-  for (q = 0; q < tx_rings; q++) {
+  for( q = 0; q < tx_rings; q++ ) {
     /* Setup txq_flags */
     struct rte_eth_txconf *txconf;
 
@@ -1142,7 +1142,7 @@ static void do_dpdk_init(int core)
 
   fprintf(stderr, "Initialising EAL\n");
   int rc = rte_eal_init(argc, argv);
-  if (rc < 0) {
+  if( rc < 0 ) {
     rte_exit(EXIT_FAILURE, "Failed to initialise EAL (%s)\n", rte_strerror(-rc));
   }
   fprintf(stderr, "Initialised EAL\n");
@@ -1253,7 +1253,7 @@ static void do_init(void)
 #endif
 
 #ifdef USE_DPDK
-  else if (handle_type & HTF_DPDK ) {
+  else if( handle_type & HTF_DPDK ) {
     if( cfg_tmpl_send[0] != -1 ) {
       sfnt_err("ERROR: templated sends not supported for DPDK\n");
       sfnt_fail_setup();
