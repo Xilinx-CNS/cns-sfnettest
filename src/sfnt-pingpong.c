@@ -73,6 +73,8 @@ static int         cfg_zc[2];
 static unsigned    cfg_warm[2];
 static int         cfg_tmpl_send[2] = {-1, -1};
 static const char* cfg_server_type;
+static const char* cfg_dpdk_args;
+static const char* cfg_server_dpdk_args;
 
 /* CL1* implies that the cmdline args are the same for both client and
  * server.  CL2* implies that different options can be specified for
@@ -130,7 +132,9 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL2F("zerocopy",    cfg_zc,          "Use Zero Copy API for TCP tx and UDP rx"),
   CL2U("warm",        cfg_warm,        "Use MSG_WARM in usecs gap (must be < spin-gap)"),
   CL2I("template",    cfg_tmpl_send,   "Use templated_sends and update thispercentage of bytes"),
-  CL1S("server-type", cfg_server_type,  "Use different variant for server [udp|zf_udp|dpdk_udp]"),
+  CL1S("server-type", cfg_server_type, "Use different variant for server [udp|zf_udp|dpdk_udp]"),
+  CL1S("dpdk-args",   cfg_dpdk_args,   "Specify DPDK arguments. Separate multiple arguments with ';'"),
+  CL1S("server-dpdk-args", cfg_server_dpdk_args, "Use different DPDK args for server (otherwise uses same as --dpdk-args)"),
 };
 
 
@@ -1136,11 +1140,23 @@ static void do_dpdk_init(int core)
   char* argv[10] = { "dummy", "--proc-type=auto", "-l1", NULL };
   int argc = 3;
   char set_core[30];
+  char* dpdk_args;
+  int i;
 
   sprintf(set_core, "-l%d", core);
   argv[2] = set_core;
 
   fprintf(stderr, "Initialising EAL\n");
+  if( cfg_dpdk_args ) {
+    dpdk_args = strdup(cfg_dpdk_args);
+    while( (argv[argc++] = strsep(&dpdk_args, ";")) )
+      ;
+    --argc;
+    NT_TEST(argc < 10);
+  }
+  for( i = 1; i < argc; ++i )
+    fprintf(stderr, "DPDK args: %s\n", argv[i]);
+
   int rc = rte_eal_init(argc, argv);
   if( rc < 0 ) {
     rte_exit(EXIT_FAILURE, "Failed to initialise EAL (%s)\n", rte_strerror(-rc));
@@ -1562,6 +1578,7 @@ static void client_send_opts(int ss)
   sfnt_sock_put_int(ss, cfg_zc[1]);
   sfnt_sock_put_int(ss, cfg_warm[1]);
   sfnt_sock_put_int(ss, cfg_tmpl_send[1]);
+  sfnt_sock_put_str(ss, cfg_server_dpdk_args);
 }
 
 
@@ -1591,6 +1608,7 @@ static void server_recv_opts(int ss)
   cfg_zc[0] = sfnt_sock_get_int(ss);
   cfg_warm[0] = sfnt_sock_get_int(ss);
   cfg_tmpl_send[0] = sfnt_sock_get_int(ss);
+  cfg_dpdk_args = sfnt_sock_get_str(ss);
 }
 
 
@@ -2152,6 +2170,27 @@ static enum handle_type handle_from_string(const char* handle_type_s)
  return ht;
 }
 
+void validate_dpdk_args(const char* dpdk_args, const char* option)
+{
+  char* local_args = strdup(dpdk_args);
+  char* s;
+
+  while( (s = strsep(&local_args, ";")) ) {
+    if( ! strncmp(s, "-l", 2) ) {
+      sfnt_err( "-l option not permitted in %s\n"
+                "Please use --affinity option instead\n",
+                option );
+      sfnt_fail_setup();
+    }
+    else if( ! strncmp(s, "--proc-type", 11) ) {
+      sfnt_err( "--proc-type option not permitted in %s\n", option );
+      sfnt_fail_setup();
+    }
+  }
+  if( local_args )
+    free(local_args);
+}
+
 static int do_client2(int ss, const char* hostport, int local);
 
 
@@ -2181,6 +2220,13 @@ static int do_client(int argc, char* argv[])
       sfnt_fail_usage("--server-type must be a udp variant");
   }
 
+  if( cfg_dpdk_args )
+    validate_dpdk_args(cfg_dpdk_args, "--dpdk-args");
+
+  if( cfg_server_dpdk_args )
+    validate_dpdk_args(cfg_server_dpdk_args, "--server-dpdk-args");
+  else
+    cfg_server_dpdk_args = cfg_dpdk_args;
 
   if( handle_type & HTF_LOCAL ) {
     int ss[2];
