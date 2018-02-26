@@ -211,6 +211,7 @@ static struct zf_stack* ztack;
 
 #define NUM_MBUFS 1023
 #define MBUF_CACHE_SIZE 250
+#define MAX_PKT_BURST 32 /* NB this must be >=4 for correct operation of Intel NICs */
 
 #define IP_VERSION 0x40
 #define IP_HDRLEN  0x05 /* default IP header length == five 32-bits words. */
@@ -410,45 +411,49 @@ static ssize_t sfn_zft_send(union handle h, const void* buf, size_t len,
 /* currently this is non blocking. Wrap with rfn_dpdk_recv to spin */
 static ssize_t _rfn_dpdk_recv(union handle h, void* buf, size_t len, int flags)
 {
-  unsigned num_rx = 0;
-  struct rte_mbuf* m;
+  /* These must be static so the values are preserved between calls */
+  static unsigned num_outstanding = 0;
+  static unsigned index = 0;
+  static struct rte_mbuf* mbufs[MAX_PKT_BURST];
+
   struct rte_net_hdr_lens hdr_lens;
   struct udp_hdr* udp;
   char* payload;
-  int paylen;
+  int paylen = -EAGAIN; /* return EAGAIN if we don't have a useful packet */
 
-  num_rx = rte_eth_rx_burst(0, 0, &m, 1);
+  if( likely(num_outstanding == 0) ) {
+      num_outstanding = rte_eth_rx_burst(0, 0, mbufs, MAX_PKT_BURST);
+      index = 0;
+    }
 
-  if( likely(num_rx == 0) )
+  if( likely(num_outstanding == 0) )
     return -EAGAIN;
 
-  uint32_t ptype = rte_net_get_ptype(m, &hdr_lens, RTE_PTYPE_ALL_MASK);
+  uint32_t ptype = rte_net_get_ptype(mbufs[index], &hdr_lens,
+                                     RTE_PTYPE_ALL_MASK);
   switch( ptype & RTE_PTYPE_L4_MASK ) {
   case RTE_PTYPE_L4_UDP:
-    udp = (struct udp_hdr*)( rte_pktmbuf_mtod(m, char*)
+    udp = (struct udp_hdr*)( rte_pktmbuf_mtod(mbufs[index], char*)
                              + hdr_lens.l2_len + hdr_lens.l3_len );
     payload = (char*)( udp +1 );
     /* NB network byte order. Also dgram_len includes UDP header */
-    paylen = ntohs(udp->dgram_len) - hdr_lens.l4_len;
-    if( (udp->src_port != peer_sa.sin_port) ||
-        (udp->dst_port != my_sa.sin_port) ) {
-      rte_pktmbuf_free(m);
-      return -EAGAIN;
+    if( (udp->src_port == peer_sa.sin_port) &&
+        (udp->dst_port == my_sa.sin_port) ) {
+      paylen = ntohs(udp->dgram_len) - hdr_lens.l4_len;
+      if( paylen != len ) {
+        printf("Payload length %d does not match requested length %zd\n",
+               paylen, len);
+        exit(0);
+      }
+      rte_memcpy(buf, payload, paylen);
     }
-    if( paylen != len ) {
-      printf("Payload length %d does not match requested length %zd\n",
-             paylen, len);
-      exit(0);
-    }
-    rte_memcpy(buf, payload, paylen);
-    rte_pktmbuf_free(m);
-    return paylen;
     break;
-
-  default:
-    rte_pktmbuf_free(m);
-    return -EAGAIN;
   }
+
+  rte_pktmbuf_free(mbufs[index]);
+  ++index;
+  --num_outstanding;
+  return paylen;
 }
 
 
@@ -500,7 +505,6 @@ fill_udp_pkt(struct rte_mbuf *m, int paylen, uint16_t n, const char* data)
   ip4->fragment_offset = IP_DN_FRAGMENT_FLAG;
   ip4->time_to_live = IP_DEFTTL;
   ip4->next_proto_id = IPPROTO_UDP;
-  ip4->hdr_checksum = 0;
   ip4->src_addr = my_sa.sin_addr.s_addr;
   ip4->dst_addr = peer_sa.sin_addr.s_addr;
 
@@ -508,7 +512,6 @@ fill_udp_pkt(struct rte_mbuf *m, int paylen, uint16_t n, const char* data)
   udp->src_port = my_sa.sin_port;
   udp->dst_port = peer_sa.sin_port;
   udp->dgram_len = htons(paylen + sizeof(struct udp_hdr));
-  udp->dgram_cksum = 0;
 
   /* fill in payload */
   rte_memcpy(payload, data, paylen);
@@ -516,6 +519,13 @@ fill_udp_pkt(struct rte_mbuf *m, int paylen, uint16_t n, const char* data)
   /* book-keeping */
   m->data_len = tx_frame_len;
   m->pkt_len = tx_frame_len;
+
+  /* checksums */
+  udp->dgram_cksum = 0;
+  udp->dgram_cksum = rte_ipv4_udptcp_cksum(ip4, udp);
+  ip4->hdr_checksum = 0;
+  ip4->hdr_checksum = rte_ipv4_cksum(ip4);
+  m->ol_flags &= ~(PKT_TX_IP_CKSUM|PKT_TX_UDP_CKSUM);
 }
 
 
