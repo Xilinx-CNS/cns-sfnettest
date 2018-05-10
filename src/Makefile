@@ -64,7 +64,7 @@ ifeq ($(SFNT_VERSION),)
 
 SFNT_VERSION	:= $(shell hg id --id 2>/dev/null || \
   ( test -f ../.hg_archival.txt && \
-    awk -n '/node:/{print $$2}' ../.hg_archival.txt ) || \
+    awk '/node:/{print $$2}' ../.hg_archival.txt ) || \
   echo no-version)
 else
 ifneq ($(SFNT_RELEASE_CSUM),$(SFNT_SRC_CSUM))
