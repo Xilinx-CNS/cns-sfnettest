@@ -35,6 +35,8 @@ static inline void sfnt_tsc(uint64_t* pval) {
                    );
   *pval = (upper << 32) | lower;
 }
+#elif defined(__aarch64__)
+# define sfnt_tsc(pval)  __asm__ __volatile__("isb; mrs %0, cntvct_el0": "=r" (*(pval)))
 #else
 # error Unknown processor.
 #endif
