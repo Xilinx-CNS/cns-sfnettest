@@ -765,7 +765,7 @@ static int do_server(void)
   /* Open listening socket, and wait for client to connect. */
   NT_TRY2(sl, socket(PF_INET, SOCK_STREAM, 0));
   NT_TRY(setsockopt(sl, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)));
-  NT_TRY(sfnt_bind_port(sl, cfg_port));
+  NT_TRY(sfnt_bind_port(sl, AF_INET, cfg_port));
   NT_TRY(listen(sl, 1));
   if( ! sfnt_quiet )
     sfnt_err("%s: server: waiting for client to connect...\n", sfnt_app_name);
@@ -814,7 +814,7 @@ static int do_server2(int ss)
     else
       sin.sin_addr.s_addr = inet_addr(cfg_mcast);
     NT_TRY(bind(sock, (const struct sockaddr*) &sin, sizeof(sin)));
-    rc = sfnt_ip_add_membership(sock, inet_addr(cfg_mcast), cfg_mcast_intf[0]);
+    rc = sfnt_ip_add_membership(sock, AF_INET, cfg_mcast, cfg_mcast_intf[0]);
     if( rc != 0 ) {
       sfnt_err("ERROR: failed to join '%s' on interface '%s'\n",
                cfg_mcast, cfg_mcast_intf[0]);
@@ -824,7 +824,7 @@ static int do_server2(int ss)
     }
   }
   else {
-    NT_TRY(sfnt_bind_port(sock, 0));
+    NT_TRY(sfnt_bind_port(sock, AF_INET, 0));
   }
   add_fds(sock);
   NT_TRY(sfnt_sock_set_timeout(sock, SO_RCVTIMEO, timeout_ms));
@@ -848,7 +848,8 @@ static int do_server2(int ss)
     hostport = sfnt_sock_get_str(ss);
     if( ! sfnt_quiet )
       sfnt_err("sfnt-stream: server: client %d at %s\n", i, hostport);
-    NT_TEST(sfnt_getaddrinfo(hostport, NULL, -1, &client->addrinfo) == 0);
+    NT_TEST(sfnt_getaddrinfo(AF_INET, hostport, NULL,
+                             -1, &client->addrinfo) == 0);
     free(hostport);
   }
 
@@ -1594,7 +1595,7 @@ static int do_client2(int ss, const char* hostport, int local)
     if( cfg_bindtodev[0] )
       NT_TRY(sfnt_so_bindtodevice(us, cfg_bindtodev[0]));
     if( cfg_mcast_intf[0] )
-      NT_TRY(sfnt_ip_multicast_if(us, cfg_mcast_intf[0]));
+      NT_TRY(sfnt_ip_multicast_if(us, AF_INET, cfg_mcast_intf[0]));
     uc = cfg_mcast_loop;
     NT_TRY(setsockopt(us, SOL_IP, IP_MULTICAST_LOOP, &uc, sizeof(uc)));
     if( cfg_mcast != NULL ) {

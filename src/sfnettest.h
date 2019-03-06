@@ -314,15 +314,24 @@ extern int sfnt_epoll_wait(int epfd, struct epoll_event* events,
  * [host_or_hostport] has a ":port" suffix than that is used as the port.
  * Otherwise the port is 0.
  */
-extern int sfnt_getaddrinfo(const char* host_or_hostport,
+extern int sfnt_getaddrinfo(int hint_af, const char* host_or_hostport,
                             const char* port_or_null, int port_i_or_neg,
                             struct addrinfo**ai_out);
+
+/* A bit like sfnt_getaddrinfo(), but parses host_or_hostport in a more
+ * browser-like manner, i.e. it assumes that it is trying to describe an
+ * IP:port pair, however if the port is omitted then default_port is used.
+ * To summarize, sfnt_getaddrinfo will favour the parameter over a port
+ * specified in the host_or_hostport whereas this function will allow
+ * host_or_hostport to override default_port */
+extern int sfnt_getendpointinfo(int hint_af, const char* host_or_hostport,
+                                int default_port, struct addrinfo**ai_out);
 
 /* Get port number socket is bound to. */
 extern int sfnt_get_port(int sock);
 
 /* Bind socket to given port and INADDR_ANY. */
-extern int sfnt_bind_port(int sock, int port);
+extern int sfnt_bind_port(int sock, int af, int port);
 
 /* Port selected as for sfnt_getaddrinfo(). */
 extern int sfnt_bind(int sock, const char* host_or_hostport,
@@ -340,13 +349,13 @@ extern int sfnt_so_bindtodevice(int sock, const char* intf);
 /* Set the IP_MULTICAST_IF socket option.  [intf] may be an interface name
  * (eg. "eth3"), or a hostname or IP address of a local interface.
  */
-extern int sfnt_ip_multicast_if(int sock, const char* intf);
+extern int sfnt_ip_multicast_if(int sock, int af, const char* intf);
 
 /* Do setsockopt(IP_ADD_MEMBERSHIP).  [intf_opt] may be an interface name
  * (eg. "eth3"), or a hostname or IP address of a local interface, or NULL
  * (in which case the routing table is used to choose the interface).
  */
-extern int sfnt_ip_add_membership(int sock, in_addr_t mcast_addr,
+extern int sfnt_ip_add_membership(int sock, int af, const char* mcast_addr,
                                 const char* intf_opt);
 
 /* Set socket timeout.  [send_or_recv] must be SO_RCVTIMEO or SO_SNDTIMEO. */
@@ -356,8 +365,8 @@ extern void sfnt_sock_put_int(int fd, int v);
 extern int  sfnt_sock_get_int(int fd);
 extern void  sfnt_sock_put_str(int fd, const char* str);
 extern char* sfnt_sock_get_str(int fd);
-extern void sfnt_sock_put_sockaddr_in(int fd, const struct sockaddr_in*);
-extern void sfnt_sock_get_sockaddr_in(int fd, struct sockaddr_in*);
+extern void sfnt_sock_put_sockaddr(int fd, const struct sockaddr_storage*);
+extern void sfnt_sock_get_sockaddr(int fd, struct sockaddr_storage*);
 
 
 /**********************************************************************
