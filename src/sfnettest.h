@@ -332,6 +332,7 @@ extern int sfnt_epoll_wait(int epfd, struct epoll_event* events,
  * Port is determined as follows: Use [port_or_null] unless it is NULL.
  * Otherwise use [port_i_or_neg] unless it is negative.  Otherwise if
  * [host_or_hostport] has a ":port" suffix than that is used as the port.
+ * Hostnames in square brackets and with scope identifiers are understood.
  * Otherwise the port is 0.
  *
  * On error, returns getaddrinfo-style return code.
@@ -340,10 +341,8 @@ extern int sfnt_getaddrinfo(int hint_af, const char* host_or_hostport,
                             const char* port_or_null, int port_i_or_neg,
                             struct addrinfo**ai_out);
 
-/* A bit like sfnt_getaddrinfo(), but parses host_or_hostport in a more
- * browser-like manner, i.e. it assumes that it is trying to describe an
- * IP:port pair, however if the port is omitted then default_port is used.
- * To summarize, sfnt_getaddrinfo will favour the parameter over a port
+/* As sfnt_getaddrinfo() but if the port is omitted then default_port is
+ * used, i.e. sfnt_getaddrinfo will favour the parameter over a port
  * specified in the host_or_hostport whereas this function will allow
  * host_or_hostport to override default_port.
  *

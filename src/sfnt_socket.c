@@ -20,18 +20,83 @@ static void error_unknown_address_family(int family)
 }
 
 
+/* Decode browser-style host and port specifiers.
+ * On return populates supplied pointers with bare host and port strings
+ * or NULL where not specified in input. Uses the supplied buffer if
+ * necessary, which must survive use of the returned strings.
+ */
+static int decode_hostport(char *str, size_t str_sz,
+                           const char *host,
+                           const char **host_found, const char **port_found)
+{
+  const char* port = NULL;
+  const char* firstcolon = strchr(host, ':');
+  const char* lastcolon = strrchr(host, ':');
+  const char* percent = strchr(host, '%');
+  const char* closesquare = strchr(host, ']');
+
+  /* strings we want to parse:
+   * 1.2.3.4
+   * 1.2.3.4:1234
+   * ffff::ffff
+   * ffff::ffff%eth0
+   * ffff::ffff%eth0:1234
+   * [ffff::ffff]:1234
+   * dellr630a
+   * dellr630a:1234
+   */
+
+  /* Handle a specified port */
+  if( lastcolon &&
+      (firstcolon == lastcolon ||
+       (percent && lastcolon > percent) ||
+       (closesquare && closesquare < lastcolon)) ) {
+    int hostlen = lastcolon - host;
+    if( hostlen >= str_sz )
+      return EAI_OVERFLOW;
+    strncpy(str, host, hostlen);
+    str[hostlen] = '\0';
+    host = str;
+    port = lastcolon + 1;
+  }
+
+  /* Strip square brackets */
+  if( host && host[0] == '[' && host[strlen(host) - 1] == ']' ) {
+    if( host != str ) {
+      if( strlen(host) >= str_sz )
+	return EAI_OVERFLOW;
+      strcpy(str, host);
+    }
+    str[strlen(str) - 1] = '\0';
+    host = str + 1;
+  }
+
+  *port_found = port;
+  *host_found = host;
+  return 0;
+}
+
+
 int sfnt_getaddrinfo(int hint_af, const char* host, const char* port,
                      int port_i, struct addrinfo** ai_out)
 {
+  const char *default_port = port;
   struct addrinfo hints;
   char strport[11];
+  char str[256];
+  int rc;
 
-  if( port == NULL ) {
-    if( port_i < 0 )
-      return sfnt_getendpointinfo(hint_af, host, 0, ai_out);
-    sprintf(strport, "%d", port_i);
-    port = strport;
-  }
+  rc = decode_hostport(str, sizeof(str), host, &host, &port);
+  if (rc != 0)
+    return rc;
+
+  if( default_port == NULL ) {
+    if( port_i >= 0 ) {
+      sprintf(strport, "%d", port_i);
+      port = strport;
+    }
+  } else
+    port = default_port;
 
   hints.ai_flags = AI_PASSIVE; 
   hints.ai_family = hint_af;
@@ -52,46 +117,15 @@ int sfnt_getendpointinfo(int hint_af, const char* host, int default_port,
   const char* port;
   char strport[11];
   char str[256];
-  const char* firstcolon = strchr(host, ':');
-  const char* lastcolon = strrchr(host, ':');
-  const char* percent = strchr(host, '%');
-  const char* closesquare = strchr(host, ']');
+  int rc;
 
-  /* strings we want to parse:
-   * 1.2.3.4
-   * 1.2.3.4:1234
-   * ffff::ffff
-   * ffff::ffff%eth0
-   * ffff::ffff%eth0:1234
-   * [ffff::ffff]:1234
-   * dellr630a
-   * dellr630a:1234
-   */
-  if( lastcolon &&
-      (firstcolon == lastcolon ||
-       (percent && lastcolon > percent) ||
-       (closesquare && closesquare < lastcolon)) ) {
-    int hostlen = lastcolon - host;
-    if( hostlen >= sizeof(str) )
-      return EAI_OVERFLOW;
-    strncpy(str, host, hostlen);
-    str[hostlen] = '\0';
-    host = str;
-    port = lastcolon + 1;
-  }
-  else {
+  rc = decode_hostport(str, sizeof(str), host, &host, &port);
+  if (rc != 0)
+    return rc;
+
+  if( port == NULL ) {
     port = strport;
     sprintf(strport, "%d", default_port);
-  }
-
-  if( host && host[0] == '[' && host[strlen(host) - 1] == ']' ) {
-    if( host != str ) {
-      if( strlen(host) >= sizeof(str) )
-	return EAI_OVERFLOW;
-      strcpy(str, host);
-    }
-    str[strlen(str) - 1] = '\0';
-    host = str + 1;
   }
 
   hints.ai_flags = AI_PASSIVE;
