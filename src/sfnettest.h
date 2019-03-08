@@ -196,6 +196,26 @@ do {                                                        \
   }                                                         \
 } while(0)
 
+/* Version of NT_TRY() macro that handles errors from
+ * the getaddrinfo(3) family of functions
+ */
+#define NT_TRY_GAI(x)                                           \
+do {                                                            \
+  int __rc;                                                     \
+  if( (__rc = (x)) != 0 ) {                                     \
+    sfnt_err("ERROR: at %s:%d\n", __FILE__, __LINE__);          \
+    sfnt_err("ERROR: %s failed\n", #x);                         \
+    if ( __rc == EAI_SYSTEM )                                   \
+      sfnt_err("ERROR: rc=%d errno=(%d %s)\n", (int) __rc,      \
+           errno, strerror(errno));                             \
+    else                                                        \
+      sfnt_err("ERROR: rc=%d (%s)\n", (int) __rc,               \
+           gai_strerror(__rc));                                 \
+    sfnt_fail_test();                                           \
+  }                                                             \
+} while(0)
+
+
 /**********************************************************************
  * Information about the test environment.
  */
@@ -313,6 +333,8 @@ extern int sfnt_epoll_wait(int epfd, struct epoll_event* events,
  * Otherwise use [port_i_or_neg] unless it is negative.  Otherwise if
  * [host_or_hostport] has a ":port" suffix than that is used as the port.
  * Otherwise the port is 0.
+ *
+ * On error, returns getaddrinfo-style return code.
  */
 extern int sfnt_getaddrinfo(int hint_af, const char* host_or_hostport,
                             const char* port_or_null, int port_i_or_neg,
@@ -323,7 +345,10 @@ extern int sfnt_getaddrinfo(int hint_af, const char* host_or_hostport,
  * IP:port pair, however if the port is omitted then default_port is used.
  * To summarize, sfnt_getaddrinfo will favour the parameter over a port
  * specified in the host_or_hostport whereas this function will allow
- * host_or_hostport to override default_port */
+ * host_or_hostport to override default_port.
+ *
+ * On error, returns getaddrinfo-style return code.
+ */
 extern int sfnt_getendpointinfo(int hint_af, const char* host_or_hostport,
                                 int default_port, struct addrinfo**ai_out);
 
@@ -333,11 +358,17 @@ extern int sfnt_get_port(int sock);
 /* Bind socket to given port and INADDR_ANY. */
 extern int sfnt_bind_port(int sock, int af, int port);
 
-/* Port selected as for sfnt_getaddrinfo(). */
+/* Port selected as for sfnt_getaddrinfo().
+ *
+ * On error, returns getaddrinfo-style return code.
+ */
 extern int sfnt_bind(int sock, const char* host_or_hostport,
                      const char* port_or_null, int port_i_or_neg);
 
-/* Port selected as for sfnt_getaddrinfo(). */
+/* Port selected as for sfnt_getaddrinfo().
+ *
+ * On error, returns getaddrinfo-style return code.
+ */
 extern int sfnt_connect(int sock, const char* host_or_hostport,
                         const char* port_or_null, int port_i_or_neg);
 
@@ -348,12 +379,16 @@ extern int sfnt_so_bindtodevice(int sock, const char* intf);
 
 /* Set the IP_MULTICAST_IF socket option.  [intf] may be an interface name
  * (eg. "eth3"), or a hostname or IP address of a local interface.
+ *
+ * On error, returns getaddrinfo-style return code.
  */
 extern int sfnt_ip_multicast_if(int sock, int af, const char* intf);
 
 /* Do setsockopt(IP_ADD_MEMBERSHIP).  [intf_opt] may be an interface name
  * (eg. "eth3"), or a hostname or IP address of a local interface, or NULL
  * (in which case the routing table is used to choose the interface).
+ *
+ * On error, returns getaddrinfo-style return code.
  */
 extern int sfnt_ip_add_membership(int sock, int af, const char* mcast_addr,
                                 const char* intf_opt);

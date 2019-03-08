@@ -634,7 +634,7 @@ static void add_fds(int us)
   if( cfg_tcpc_serv ) {
     for( i = 0; i < cfg_n_tcpc[0]; ++i ) {
       NT_TRY2(sock, socket(PF_INET, SOCK_STREAM, 0));
-      NT_TRY(sfnt_connect(sock, cfg_tcpc_serv, NULL, -1));
+      NT_TRY_GAI(sfnt_connect(sock, cfg_tcpc_serv, NULL, -1));
       mux_add(sock);
     }
   } else if( cfg_n_tcpc[0] > 0 ) {
@@ -824,14 +824,16 @@ static int udp_create_and_bind_sock(int ss)
 
   if( cfg_mcast ) {
     if( cfg_mcast_intf[0] )
-      NT_TRY(sfnt_ip_multicast_if(us, my_sa.ss_family, cfg_mcast_intf[0]));
+      NT_TRY_GAI(sfnt_ip_multicast_if(us, my_sa.ss_family, cfg_mcast_intf[0]));
     rc = sfnt_ip_add_membership(us, my_sa.ss_family, cfg_mcast,
                                 cfg_mcast_intf[0]);
     if( rc != 0 ) {
       sfnt_err("ERROR: failed to join '%s' on interface '%s'\n",
                cfg_mcast, cfg_mcast_intf[0]);
-      sfnt_err("ERROR: rc=%d errno=(%d %s) gai_strerror=(%s)\n",
-               rc, errno, strerror(errno), gai_strerror(rc));
+      sfnt_err("ERROR: rc=%d gai_strerror=(%s) errno=(%d %s)\n",
+               rc, gai_strerror(rc),
+	       rc == EAI_SYSTEM ? errno : 0,
+	       rc == EAI_SYSTEM ? strerror(errno) : "N/A");
       sfnt_fail_setup();
     }
     /* Solaris requires this to be an unsigned char */
@@ -1208,7 +1210,7 @@ static int try_connect(const char* hostport, int default_port)
   int err;
 
   while( 1 ) {
-    NT_TEST(!sfnt_getendpointinfo(AF_UNSPEC, hostport, default_port, &ai));
+    NT_TRY_GAI(sfnt_getendpointinfo(AF_UNSPEC, hostport, default_port, &ai));
     NT_TRY2(ss, socket(ai->ai_family, SOCK_STREAM, 0));
     NT_TRY(setsockopt(ss, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
     rc = connect(ss, ai->ai_addr, ai->ai_addrlen);
@@ -1345,7 +1347,7 @@ static int do_client2(int ss, const char* hostport, int local)
   case FDT_TCP: {
     struct addrinfo* ai;
     int port = sfnt_sock_get_int(ss);
-    NT_TEST(!sfnt_getaddrinfo(AF_UNSPEC, hostport, NULL, port, &ai));
+    NT_TRY_GAI(sfnt_getaddrinfo(AF_UNSPEC, hostport, NULL, port, &ai));
     NT_TRY2(read_fd, socket(ai->ai_family, SOCK_STREAM, 0));
     if( cfg_nodelay[0] )
       NT_TRY(setsockopt(read_fd, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));

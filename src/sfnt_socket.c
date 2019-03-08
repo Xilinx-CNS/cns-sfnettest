@@ -149,7 +149,9 @@ int sfnt_bind(int sock, const char* host_or_hostport,
     return rc;
   rc = bind(sock, ai->ai_addr, ai->ai_addrlen);
   freeaddrinfo(ai);
-  return rc;
+
+  /* Present any error in getaddrinfo style; EAI_SYSTEM => look at errno */
+  return rc < 0 ? EAI_SYSTEM : rc;
 }
 
 
@@ -164,7 +166,9 @@ int sfnt_connect(int sock, const char* host_or_hostport,
     return rc;
   rc = connect(sock, ai->ai_addr, ai->ai_addrlen);
   freeaddrinfo(ai);
-  return rc;
+
+  /* Present any error in getaddrinfo style; EAI_SYSTEM => look at errno */
+  return rc < 0 ? EAI_SYSTEM : rc;
 }
 
 
@@ -180,7 +184,7 @@ int sfnt_so_bindtodevice(int sock, const char* dev_name)
 int sfnt_so_bindtodevice(int sock, const char* dev_name)
 {
   sfnt_err("ERROR: SO_BINDTODEVICE requested but not supported on this "
-	   "platform\n");
+           "platform\n");
   sfnt_fail_test();
   /* never reached */
   return -1;
@@ -190,14 +194,21 @@ int sfnt_so_bindtodevice(int sock, const char* dev_name)
 
 int sfnt_ip_multicast_if(int sock, int af, const char* intf)
 {
+  int rc;
+
+  /* Any errors are presented in getaddrinfo style where a return code
+     of EAI_SYSTEM means look at the errno. */
+
   if( af == AF_INET6 ) {
     int ifindex;
 
     ifindex = if_nametoindex(intf);
     if( ifindex == 0 )
-      return -1;
-    return setsockopt(sock, IPPROTO_IPV6, IPV6_MULTICAST_IF, &ifindex,
+      rc = -1;
+    else
+      rc = setsockopt(sock, IPPROTO_IPV6, IPV6_MULTICAST_IF, &ifindex,
                       sizeof(ifindex));
+    return rc < 0 ? EAI_SYSTEM : rc;
   }
   else {
     struct addrinfo* ai;
@@ -205,7 +216,6 @@ int sfnt_ip_multicast_if(int sock, int af, const char* intf)
 #if NT_HAVE_IP_MREQN
     struct ip_mreqn r;
 #endif
-    int rc;
 
     memset(&sin, 0, sizeof(sin));
 
@@ -217,19 +227,22 @@ int sfnt_ip_multicast_if(int sock, int af, const char* intf)
     } else
     /* note hanging else */
 #endif
-    if( (rc = sfnt_getaddrinfo(AF_INET, intf, NULL, 0, &ai)) == 0 ) {
-      sin = ((struct sockaddr_in*) ai->ai_addr)->sin_addr;
-      freeaddrinfo(ai);
+    {
+      rc = sfnt_getaddrinfo(AF_INET, intf, NULL, 0, &ai);
+      if (rc == 0) {
+        sin = ((struct sockaddr_in*) ai->ai_addr)->sin_addr;
+        freeaddrinfo(ai);
+      } else
+        return rc;
     }
-    else
-      return rc;
 
 #if NT_HAVE_IP_MREQN
     r.imr_address = sin;
-    return setsockopt(sock, SOL_IP, IP_MULTICAST_IF, &r, sizeof(r));
+    rc = setsockopt(sock, SOL_IP, IP_MULTICAST_IF, &r, sizeof(r));
 #else
-    return setsockopt(sock, SOL_IP, IP_MULTICAST_IF, &sin, sizeof(sin));
+    rc = setsockopt(sock, SOL_IP, IP_MULTICAST_IF, &sin, sizeof(sin));
 #endif
+    return rc < 0 ? EAI_SYSTEM : rc;
   }
 }
 
@@ -237,16 +250,22 @@ int sfnt_ip_multicast_if(int sock, int af, const char* intf)
 int sfnt_ip_add_membership(int sock, int af, const char* mcast_addr,
                            const char* intf)
 {
+  int rc;
+
+  /* Any errors are presented in getaddrinfo style where a return code
+     of EAI_SYSTEM means look at the errno. */
+
   if( af == AF_INET6 ) {
     struct ipv6_mreq r;
     if( intf != NULL ) {
       r.ipv6mr_interface = if_nametoindex(intf);
       if( r.ipv6mr_interface == 0 )
-        return -1;
+        return EAI_SYSTEM;
     }
 
     inet_pton(af, mcast_addr, &r.ipv6mr_multiaddr);
-    return setsockopt(sock, IPPROTO_IPV6, IPV6_ADD_MEMBERSHIP, &r, sizeof(r));
+    rc = setsockopt(sock, IPPROTO_IPV6, IPV6_ADD_MEMBERSHIP, &r, sizeof(r));
+    return rc < 0 ? EAI_SYSTEM : rc;
   }
   else {
     struct addrinfo* ai;
@@ -268,12 +287,14 @@ int sfnt_ip_add_membership(int sock, int af, const char* mcast_addr,
       } else
       /* note hanging else */
 #endif
-      if( (rc = sfnt_getaddrinfo(AF_INET, intf, NULL, 0, &ai)) == 0 ) {
-        sin = ((struct sockaddr_in*) ai->ai_addr)->sin_addr;
-        freeaddrinfo(ai);
+      {
+        rc = sfnt_getaddrinfo(AF_INET, intf, NULL, 0, &ai);
+        if (rc == 0) {
+          sin = ((struct sockaddr_in*) ai->ai_addr)->sin_addr;
+          freeaddrinfo(ai);
+        } else
+          return rc;
       }
-      else
-        return rc;
     }
 
     r.imr_multiaddr.s_addr = inet_addr(mcast_addr);
@@ -282,7 +303,8 @@ int sfnt_ip_add_membership(int sock, int af, const char* mcast_addr,
 #else
     r.imr_interface = sin;
 #endif
-    return setsockopt(sock, SOL_IP, IP_ADD_MEMBERSHIP, &r, sizeof(r));
+    rc = setsockopt(sock, SOL_IP, IP_ADD_MEMBERSHIP, &r, sizeof(r));
+    return rc < 0 ? EAI_SYSTEM : rc;
   }
 }
 
