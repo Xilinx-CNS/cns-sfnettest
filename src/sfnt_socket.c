@@ -71,10 +71,13 @@ int sfnt_getendpointinfo(int hint_af, const char* host, int default_port,
       (firstcolon == lastcolon ||
        (percent && lastcolon > percent) ||
        (closesquare && closesquare < lastcolon)) ) {
-    port = lastcolon + 1;
-    strncpy(str, host, sizeof(str));
-    str[sizeof(str) - 1] = '\0';
+    int hostlen = lastcolon - host;
+    if( hostlen >= sizeof(str) )
+      return EAI_OVERFLOW;
+    strncpy(str, host, hostlen);
+    str[hostlen] = '\0';
     host = str;
+    port = lastcolon + 1;
   }
   else {
     port = strport;
@@ -82,8 +85,11 @@ int sfnt_getendpointinfo(int hint_af, const char* host, int default_port,
   }
 
   if( host && host[0] == '[' && host[strlen(host) - 1] == ']' ) {
-    if( host != str )
+    if( host != str ) {
+      if( strlen(host) >= sizeof(str) )
+	return EAI_OVERFLOW;
       strcpy(str, host);
+    }
     str[strlen(str) - 1] = '\0';
     host = str + 1;
   }
