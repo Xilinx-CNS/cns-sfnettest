@@ -1647,7 +1647,7 @@ static int do_client3(struct client_tx* ctx)
 {
   int i;
 
-  ctx->msg = malloc(64 * 1024);
+  ctx->msg = calloc(1, 64 * 1024);
 
   sfnt_dump_sys_info(&tsc);
   if( ctx->server_ld_preload != NULL )
