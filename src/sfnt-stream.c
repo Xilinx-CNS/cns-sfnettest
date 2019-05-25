@@ -84,7 +84,7 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1S("mcast",       cfg_mcast,       "set multicast address"               ),
   CL2S("mcastintf",   cfg_mcast_intf,  "set multicast interface"             ),
   CL1F("mcastloop",   cfg_mcast_loop,  "IP_MULTICAST_LOOP"                   ),
-  CL2F("ttl",         cfg_ttl,         "IP_TTL and IP_MULTICAST_TTL"         ),
+  CL2I("ttl",         cfg_ttl,         "IP_TTL and IP_MULTICAST_TTL"         ),
   CL2S("bindtodev",   cfg_bindtodev,   "SO_BINDTODEVICE"                     ),
   CL2U("n-pipe",      cfg_n_pipe,      "include pipes in fd set"             ),
   CL2U("n-unix-d",    cfg_n_unixd,     "include unix dgram in fd set"        ),
