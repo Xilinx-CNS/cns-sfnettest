@@ -1115,8 +1115,9 @@ static void run_test(int ss, int read_fd, int write_fd, int maxms, int minms,
   do {
     if( *results_n + n_this_time > maxiter )
       n_this_time = maxiter - *results_n;
+    if( n_this_time == 0 )
+      break;     /* No point in continuing, even if minms is not yet met */
 
-    /* n_this_time can be 0 if minms not yet met */
     do_pings(ss, read_fd, write_fd, msg_size,
              n_this_time, results + *results_n);
     *results_n += n_this_time;
