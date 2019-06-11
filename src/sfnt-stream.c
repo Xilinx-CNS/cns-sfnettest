@@ -856,6 +856,14 @@ static int do_server2(int ss)
   struct sockaddr_storage sa;
   socklen_t sal = sizeof(sa);
   int rc, i, sock;
+  int af;
+
+  if( cfg_ipv4 )
+    af = AF_INET;
+  else if( cfg_ipv6 )
+    af = AF_INET6;
+  else
+    af = AF_UNSPEC;
 
   server_check_ver(ss);
   server_recv_opts(ss);
@@ -873,21 +881,25 @@ static int do_server2(int ss)
   /* Init after we've received config opts from client. */
   do_init();
 
-  NT_TRY(getsockname(ss, (struct sockaddr*)&sa, &sal));
+  /* Establish which AF is to be used ahead of creating socket. */
+  if( cfg_mcast ) {
+    sal = sfnt_getendpoint(af, cfg_mcast, 0, (struct sockaddr *) &sa, sal);
+  } else {
+    /* Use AF from control connection */
+    NT_TRY(getsockname(ss, (struct sockaddr*)&sa, &sal));
+  }
+
   NT_TRY2(sock, socket(sa.ss_family, SOCK_DGRAM, 0));
   set_ttl(sa.ss_family, sock, cfg_ttl[0]);
   if( cfg_bindtodev[0] )
     NT_TRY(sfnt_so_bindtodevice(sock, cfg_bindtodev[0]));
   if( cfg_mcast ) {
     NT_ASSERT(sa.ss_family == AF_INET); /* TODO: multicast v6 currently not supported */
-    struct sockaddr_in sin;
-    sin.sin_family = AF_INET;
-    sin.sin_port = 0;
-    if( 1 )  /* allows us to support mcast or unicast receive */
-      sin.sin_addr.s_addr = htonl(INADDR_ANY);
-    else
-      sin.sin_addr.s_addr = inet_addr(cfg_mcast);
-    NT_TRY(bind(sock, (const struct sockaddr*) &sin, sizeof(sin)));
+
+    /* clear host address part to support mcast or unicast receive.*/
+    sal = sfnt_getendpoint(sa.ss_family, cfg_mcast, 0, (struct sockaddr *) &sa, sal);
+
+    NT_TRY(bind(sock, (const struct sockaddr*) &sa, sal));
     rc = sfnt_ip_add_membership(sock, AF_INET, cfg_mcast, cfg_mcast_intf[0]);
     if( rc != 0 ) {
       sfnt_err("ERROR: failed to join '%s' on interface '%s'\n",
@@ -1616,18 +1628,18 @@ static int do_client2(int ss, const char* hostport, int local)
   struct client_tx* ctx;
   unsigned char uc;
   int one = 1;
-  int search_af;
+  int af;
   struct addrinfo *ai;
   struct sockaddr_storage sa;
   socklen_t sa_len;
   int port;
 
   if( cfg_ipv4 )
-    search_af = AF_INET;
+    af = AF_INET;
   else if( cfg_ipv6 )
-    search_af = AF_INET6;
+    af = AF_INET6;
   else
-    search_af = AF_UNSPEC;
+    af = AF_UNSPEC;
 
   client_check_ver(ss);
 
@@ -1652,30 +1664,28 @@ static int do_client2(int ss, const char* hostport, int local)
   }
 
   if( cfg_mcast_intf[0] != NULL && cfg_mcast == NULL ) {
-    if (search_af == AF_UNSPEC ) {
+    if (af == AF_UNSPEC ) {
       struct sockaddr_storage sa;
       socklen_t sal = sizeof(sa);
       NT_TRY(getsockname(ss, (struct sockaddr*) &sa, &sal));
-      search_af = sa.ss_family;
+      af = sa.ss_family;
     }
-    cfg_mcast = search_af == AF_INET6 ? "ff05::143"
-                                      : "224.1.2.49";
+    cfg_mcast = af == AF_INET6 ? "ff05::143"
+                               : "224.1.2.49";
   }
 
-  if( !cfg_mcast ) {
-    /* Establish which AF is to be used for traffic ahead of creating
-       receive thread, which means looking up the destination now,
-       without port knowledge. */
-    NT_TRY_GAI(sfnt_getendpointinfo(search_af, hostport, 0, &ai));
-    search_af = ai->ai_family;
-    freeaddrinfo(ai);
-  }
+  /* Establish which AF is to be used for traffic ahead of creating
+     receive thread, which means looking up the destination now,
+     without port knowledge. */
+  NT_TRY_GAI(sfnt_getendpointinfo(af, cfg_mcast ? cfg_mcast : hostport, 0, &ai));
+  af = ai->ai_family;
+  freeaddrinfo(ai);
 
   do_init();
   client_send_opts(ss);
   ctx = malloc(sizeof(*ctx));
   ctx->ss = ss;
-  ctx->crx = client_rx_thread_start(search_af);
+  ctx->crx = client_rx_thread_start(af);
 
   if( ! cfg_rates || sfnt_ilist_parse(&ctx->rates, cfg_rates) != 0 )
     sfnt_fail_usage("ERROR: Malformed argument to option --rates");
@@ -1684,9 +1694,9 @@ static int do_client2(int ss, const char* hostport, int local)
 
   /* Look up address again but with known port and AF. */
   port = sfnt_sock_get_int(ss);
-  NT_TRY_GAI(sfnt_getaddrinfo(search_af, hostport, NULL, port, &ai));
+  NT_TRY_GAI(sfnt_getaddrinfo(af, hostport, NULL, port, &ai));
   NT_ASSERT(ai->ai_addrlen <= sizeof(sa));
-  NT_ASSERT(search_af == ai->ai_family);
+  NT_ASSERT(af == ai->ai_family);
   memcpy(&sa, ai->ai_addr, ai->ai_addrlen);
   sa_len = ai->ai_addrlen;
   freeaddrinfo(ai);
@@ -1694,7 +1704,7 @@ static int do_client2(int ss, const char* hostport, int local)
   /* Create and bind/connect test socket. */
   switch( fd_type ) {
   case FDT_TCP: {
-    NT_TRY2(ctx->read_fd, socket(search_af, SOCK_STREAM, 0));
+    NT_TRY2(ctx->read_fd, socket(af, SOCK_STREAM, 0));
     if( cfg_nodelay )
       NT_TRY(setsockopt(ctx->read_fd, SOL_TCP, TCP_NODELAY,
                         &one, sizeof(one)));
@@ -1709,8 +1719,8 @@ static int do_client2(int ss, const char* hostport, int local)
     char host[75];
     char reply_hostport[80];
 
-    NT_TRY2(us, socket(search_af, SOCK_DGRAM, 0));
-    set_ttl(search_af, us, cfg_ttl[0]);
+    NT_TRY2(us, socket(af, SOCK_DGRAM, 0));
+    set_ttl(af, us, cfg_ttl[0]);
     if( cfg_bindtodev[0] )
       NT_TRY(sfnt_so_bindtodevice(us, cfg_bindtodev[0]));
     if( cfg_mcast_intf[0] )

@@ -351,6 +351,15 @@ extern int sfnt_getaddrinfo(int hint_af, const char* host_or_hostport,
 extern int sfnt_getendpointinfo(int hint_af, const char* host_or_hostport,
                                 int default_port, struct addrinfo**ai_out);
 
+/* Calls sfnt_getendpointinfo() and populates a single struct sockaddr,
+ * returning the length of the address.
+ *
+ * Catches errors, including failure to resolve.
+ */
+extern socklen_t sfnt_getendpoint(int hint_af, const char* host_or_hostport,
+				  int default_port, struct sockaddr *addr,
+				  socklen_t addrlen);
+
 /* Get port number socket is bound to. */
 extern int sfnt_get_port(int sock);
 

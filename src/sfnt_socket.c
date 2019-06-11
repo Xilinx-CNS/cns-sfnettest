@@ -30,10 +30,17 @@ static int decode_hostport(char *str, size_t str_sz,
                            const char **host_found, const char **port_found)
 {
   const char* port = NULL;
-  const char* firstcolon = strchr(host, ':');
-  const char* lastcolon = strrchr(host, ':');
-  const char* percent = strchr(host, '%');
-  const char* closesquare = strchr(host, ']');
+  const char* firstcolon = NULL;
+  const char* lastcolon = NULL;
+  const char* percent = NULL;
+  const char* closesquare = NULL;
+
+  if( host ) {
+    firstcolon = strchr(host, ':');
+    lastcolon = strrchr(host, ':');
+    percent = strchr(host, '%');
+    closesquare = strchr(host, ']');
+  }
 
   /* strings we want to parse:
    * 1.2.3.4
@@ -137,6 +144,21 @@ int sfnt_getendpointinfo(int hint_af, const char* host, int default_port,
   hints.ai_canonname = NULL;
   hints.ai_next = NULL;
   return getaddrinfo(host, port, &hints, ai_out);
+}
+
+
+socklen_t sfnt_getendpoint(int hint_af, const char* host, int default_port,
+                           struct sockaddr *addr, socklen_t addrlen)
+{
+  struct addrinfo *ai;
+
+  NT_TRY_GAI(sfnt_getendpointinfo(hint_af, host, default_port, &ai));
+  NT_ASSERT(ai->ai_addrlen <= addrlen);
+  addrlen = ai->ai_addrlen;
+  memcpy(addr, ai->ai_addr, addrlen);
+  freeaddrinfo(ai);
+
+  return addrlen;
 }
 
 
