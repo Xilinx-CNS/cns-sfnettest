@@ -14,19 +14,21 @@
 
 static uint64_t measure_hz(int interval_usec)
 {
-  struct timeval tv_s, tv_e;
+  uint64_t t_freq = monotonic_clock_freq();
+  uint64_t t_interval = interval_usec * t_freq / 1000000;
+  uint64_t t_s, t_e;
   uint64_t tsc_s, tsc_e, tsc_e2;
-  uint64_t tsc_gtod, min_tsc_gtod, usec;
+  uint64_t tsc_gtod, min_tsc_gtod, ticks;
   int n, skew = 0;
 
   sfnt_tsc(&tsc_s);
-  gettimeofday(&tv_s, NULL);
+  t_s = monotonic_clock();
   sfnt_tsc(&tsc_e2);
   min_tsc_gtod = tsc_e2 - tsc_s;
   n = 0;
   do {
     sfnt_tsc(&tsc_s);
-    gettimeofday(&tv_s, NULL);
+    t_s = monotonic_clock();
     sfnt_tsc(&tsc_e2);
     tsc_gtod = tsc_e2 - tsc_s;
     if( tsc_gtod < min_tsc_gtod )
@@ -35,21 +37,20 @@ static uint64_t measure_hz(int interval_usec)
 
   do {
     sfnt_tsc(&tsc_e);
-    gettimeofday(&tv_e, NULL);
+    t_e = monotonic_clock();
     sfnt_tsc(&tsc_e2);
     if( tsc_e2 < tsc_e ) {
       skew = 1;
       break;
     }
     tsc_gtod = tsc_e2 - tsc_e;
-    usec = (tv_e.tv_sec - tv_s.tv_sec) * (uint64_t) 1000000;
-    usec += tv_e.tv_usec - tv_s.tv_usec;
-  } while( usec < interval_usec || tsc_gtod > min_tsc_gtod * 2 );
+    ticks = t_e - t_s;
+  } while( ticks < t_interval || tsc_gtod > min_tsc_gtod * 2 );
 
   /* ?? TODO: handle this better */
   NT_TEST(skew == 0);
 
-  return (tsc_e - tsc_s) * 1000000 / usec;
+  return (tsc_e - tsc_s) * t_freq / ticks;
 }
 
 

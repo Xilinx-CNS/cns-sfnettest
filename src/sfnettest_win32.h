@@ -164,52 +164,20 @@ static inline int __nt_socket(int domain, int type, int protocol)
 #define socket __nt_socket
 
 
-/**********************************************************************
- * Work-around lack of Windows gettimeofday()
- */
-
-/* Difference between the Windows epoch (1st January 1601) and the UNIX epoch
- * (1st Januaray 1970) in 100-nanosecond intervals. 
- */
-#define EPOCH_DELTA  116444736000000000ULL
-
-struct timezone 
+static inline uint64_t monotonic_clock_freq(void)
 {
-  int tz_minuteswest; /* minutes west of GMT/UTC */
-  int tz_dsttime;     /* type of DST correction */
-};
-
-/* measure_hz() relies on gettimeofday() being mostly constant cost, so we
- * prevent global optimisations by not allowing the compiler to inline it.
- */
-static __declspec(noinline) int __nt_gettimeofday(struct timeval* tv,
-                                                  struct timezone* tz)
-{
-  FILETIME       datetime;
-  ULARGE_INTEGER us;
-
-  if( tv ) {
-    GetSystemTimeAsFileTime(&datetime);
-
-    /* Convert from Windows file time to microseconds since UNIX epoch */
-    us.LowPart = datetime.dwLowDateTime;
-    us.HighPart = datetime.dwHighDateTime;
-    us.QuadPart -= EPOCH_DELTA;
-    us.QuadPart /= 10;
-
-    tv->tv_sec = (long)(us.QuadPart / 1000000UL);
-    tv->tv_usec = (long)(us.QuadPart % 1000000UL);
-  }
-
-  if( tz ) {
-    (void) _get_timezone(&tz->tz_minuteswest);
-    tz->tz_minuteswest /= 60;
-    (void) _get_daylight(&tz->tz_dsttime);
-  }
-
-  return 0;
+  LARGE_INTEGER f;
+  QueryPerformanceFrequency(&f);
+  return f.QuadPart;
 }
-#define gettimeofday __nt_gettimeofday
+
+
+static inline uint64_t monotonic_clock(void)
+{
+  LARGE_INTEGER f;
+  QueryPerformanceCounter(&f);
+  return f.QuadPart;
+}
 
 
 /**********************************************************************

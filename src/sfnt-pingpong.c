@@ -1106,11 +1106,13 @@ static void run_test(int ss, int read_fd, int write_fd, int maxms, int minms,
                      int maxiter, int miniter, int* results_n, int msg_size,
                      int* results)
 {
-  int ms = 0;
   int n_this_time = miniter;
-  struct timeval start, end;
+  uint64_t start, end, ticks;
+  uint64_t freq = monotonic_clock_freq();
+  uint64_t minticks = minms * freq / 1000;
+  uint64_t maxticks = maxms * freq / 1000;
 
-  gettimeofday(&start, NULL);
+  start = monotonic_clock();
 
   do {
     if( *results_n + n_this_time > maxiter )
@@ -1122,11 +1124,10 @@ static void run_test(int ss, int read_fd, int write_fd, int maxms, int minms,
              n_this_time, results + *results_n);
     *results_n += n_this_time;
 
-    gettimeofday(&end, NULL);
-    ms = (end.tv_sec - start.tv_sec) * 1000;
-    ms += (end.tv_usec - start.tv_usec) / 1000;
-  } while( (ms < maxms && *results_n < maxiter) ||
-           (ms < minms || *results_n < miniter) );
+    end = monotonic_clock();
+    ticks = end - start;
+  } while( (ticks < maxticks && *results_n < maxiter) ||
+           (ticks < minticks || *results_n < miniter) );
 }
 
 

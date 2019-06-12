@@ -137,6 +137,7 @@
 #ifdef __APPLE__
 typedef int clockid_t;
 #define CLOCK_REALTIME 0
+#define CLOCK_MONOTONIC 6
 extern int clock_gettime(clockid_t clk_id, struct timespec* ts);
 #endif
 
@@ -156,5 +157,18 @@ extern ssize_t sfnt_sendmsg_freebsd(int sockfd, const struct msghdr *msg, int fl
 #define sendto   sfnt_sendto_freebsd
 #define sendmsg  sfnt_sendmsg_freebsd
 #endif
+
+static inline uint64_t monotonic_clock_freq(void)
+{
+  return 1000000000;
+}
+
+
+static inline uint64_t monotonic_clock(void)
+{
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return (uint64_t)t.tv_sec * 1000000000 + t.tv_nsec;
+}
 
 #endif  /* __SFNETTEST_UNIX_H__ */
