@@ -1298,7 +1298,7 @@ static int do_client(int argc, char* argv[])
         sfnt_quiet = 1;
         return do_server();
       }
-      hostport = "localhost";
+      hostport = cfg_ipv6 ? "::1" : "127.0.0.1";
       local = 1;
     }
     NT_TRY2(ss, try_connect(hostport, cfg_port));
