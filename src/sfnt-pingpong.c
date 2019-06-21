@@ -148,6 +148,7 @@ enum fd_type {
 
 #define MAX_FDS            1024
 
+static struct sfnt_tsc_measure tsc_measure;
 static struct sfnt_tsc_params tsc;
 static char           ppbuf[64 * 1024];
 
@@ -497,8 +498,6 @@ static void do_init(void)
         sfnt_fail_setup();
       }
 
-  NT_TRY(sfnt_tsc_get_params(&tsc));
-
   if( fd_type == FDT_UDP && ! cfg_connect[0] ) {
     do_recv = rfn_recv;
     do_send = sfn_sendto;
@@ -670,13 +669,16 @@ static void client_check_ver(int ss)
 
 static void server_check_ver(int ss)
 {
+  sfnt_sock_cork(ss);
   sfnt_sock_put_str(ss, SFNT_VERSION);
   sfnt_sock_put_str(ss, SFNT_SRC_CSUM);
+  sfnt_sock_uncork(ss);
 }
 
 
 static void client_send_opts(int ss)
 {
+  sfnt_sock_cork(ss);
   sfnt_sock_put_int(ss, fd_type);
   sfnt_sock_put_int(ss, cfg_connect[1]);
   sfnt_sock_put_int(ss, cfg_spin[1]);
@@ -702,6 +704,7 @@ static void client_send_opts(int ss)
   sfnt_sock_put_int(ss, cfg_busy_poll[1]);
   sfnt_sock_put_int(ss, cfg_msg_more[1]);
   sfnt_sock_put_int(ss, cfg_v6only[1]);
+  sfnt_sock_uncork(ss);
 }
 
 
@@ -892,6 +895,8 @@ static int do_server(void)
 {
   int sl = -1, sl6 = -1, ss, one = 1;
 
+  sfnt_tsc_get_params_begin(&tsc_measure);
+
   /* Open listening socket, and wait for client to connect. */
   /* The support for dual-stack v4/v6 sockets is variable (e.g. default value
    * of IPV6_V6ONLY, whether IPv6 is available at all, availability of Onload
@@ -972,6 +977,10 @@ static int do_server2(int ss)
 
   /* Init after we've received config opts from client. */
   do_init();
+  /* We don't need particularly accurate timing on the server side, so a
+   * millisecond of calibration should be fine - it's only used for
+   * timeouts */
+  NT_TRY(sfnt_tsc_get_params_end(&tsc_measure, &tsc, 1000));
 
   /* Create and bind/connect test socket. */
   switch( fd_type ) {
@@ -1240,6 +1249,8 @@ static int do_client(int argc, char* argv[])
   const char* fd_type_s;
   pid_t pid;
 
+  sfnt_tsc_get_params_begin(&tsc_measure);
+
   if( argc < 1 || argc > 2 )
     sfnt_fail_usage("wrong number of arguments");
   fd_type_s = argv[0];
@@ -1387,6 +1398,10 @@ static int do_client2(int ss, const char* hostport, int local)
 
   results = malloc(cfg_maxiter * sizeof(*results));
   NT_TEST(results != NULL);
+
+  /* Very rough calibration so we've got enough data for the warmup and sys
+   * info. We re-sample more accurately again after that */
+  NT_TRY(sfnt_tsc_get_params_end(&tsc_measure, &tsc, 100));
   sfnt_dump_sys_info(&tsc);
   if( server_ld_preload != NULL )
     printf("# server LD_PRELOAD=%s\n", server_ld_preload);
@@ -1418,6 +1433,7 @@ static int do_client2(int ss, const char* hostport, int local)
   }
 
   do_warmup(ss, read_fd, write_fd);
+  NT_TRY(sfnt_tsc_get_params_end(&tsc_measure, &tsc, 50000));
   for( i = 0; i < msg_sizes.len; ++i )
     do_test(ss, read_fd, write_fd, msg_sizes.list[i], results);
 

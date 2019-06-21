@@ -12,6 +12,11 @@
 #include "sfnettest.h"
 
 
+#ifndef MSG_MORE
+#define MSG_MORE
+#endif
+
+
 static void error_unknown_address_family(int family)
 {
   /* Higher-level code should already have ensured that this can't happen. */
@@ -386,6 +391,30 @@ int sfnt_sock_set_timeout(int sock, int send_or_recv, int millisec)
 }
 
 
+extern int sfnt_sock_cork(int fd)
+{
+#ifdef TCP_CORK
+  int one = 1;
+  return setsockopt(fd, IPPROTO_TCP, TCP_CORK, &one, sizeof(one));
+#else
+  /* Corking isn't used for testing purposes: only for Nagle-avoidance during
+   * setup */
+  return -1;
+#endif
+}
+
+
+extern int sfnt_sock_uncork(int fd)
+{
+#ifdef TCP_CORK
+  int zero = 0;
+  return setsockopt(fd, IPPROTO_TCP, TCP_CORK, &zero, sizeof(zero));
+#else
+  return -1;
+#endif
+}
+
+
 void sfnt_sock_put_int(int fd, int v)
 {
   int32_t v32 = NT_LE32(v);
@@ -405,7 +434,8 @@ void  sfnt_sock_put_str(int fd, const char* str)
 {
   if( str != NULL ) {
     int len = strlen(str) + 1;
-    sfnt_sock_put_int(fd, len);
+    int32_t v32 = NT_LE32(len);
+    NT_TESTi3(send(fd, &v32, sizeof(v32), MSG_MORE), ==, sizeof(v32));
     NT_TESTi3(send(fd, str, len, 0), ==, len);
   }
   else {
@@ -417,7 +447,8 @@ void  sfnt_sock_put_str(int fd, const char* str)
 char* sfnt_sock_get_str(int fd)
 {
   char* str;
-  int len = sfnt_sock_get_int(fd);
+  int len;
+  len = sfnt_sock_get_int(fd);
   if( len == 0 )
     return NULL;
   NT_TEST(len > 0);
@@ -434,11 +465,11 @@ void sfnt_sock_put_sockaddr(int fd, const struct sockaddr_storage* ss)
      sin_port and sin_addr are already in network order so send as
      is */
   int family = NT_LE32(ss->ss_family);
-  NT_TEST(send(fd, &family, sizeof(family), 0) == sizeof(family));
+  NT_TEST(send(fd, &family, sizeof(family), MSG_MORE) == sizeof(family));
   switch( family ) {
   case PF_INET: {
     const struct sockaddr_in* sa = (const struct sockaddr_in*)ss;
-    NT_TEST(send(fd, &sa->sin_port, sizeof(sa->sin_port), 0) ==
+    NT_TEST(send(fd, &sa->sin_port, sizeof(sa->sin_port), MSG_MORE) ==
             sizeof(sa->sin_port));
     NT_TEST(send(fd, &sa->sin_addr, sizeof(sa->sin_addr), 0) ==
             sizeof(sa->sin_addr));
@@ -446,7 +477,7 @@ void sfnt_sock_put_sockaddr(int fd, const struct sockaddr_storage* ss)
   }
   case PF_INET6: {
     const struct sockaddr_in6* sa = (const struct sockaddr_in6*)ss;
-    NT_TEST(send(fd, &sa->sin6_port, sizeof(sa->sin6_port), 0) ==
+    NT_TEST(send(fd, &sa->sin6_port, sizeof(sa->sin6_port), MSG_MORE) ==
             sizeof(sa->sin6_port));
     NT_TEST(send(fd, &sa->sin6_addr, sizeof(sa->sin6_addr), 0) ==
             sizeof(sa->sin6_addr));

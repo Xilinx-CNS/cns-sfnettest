@@ -240,10 +240,25 @@ struct sfnt_tsc_params {
   uint64_t  tsc_cost;
 };
 
+struct sfnt_tsc_measure {
+  uint64_t t_s;
+  uint64_t tsc_s;
+  uint64_t min_tsc_gtod;
+};
+
 /* Measure the speed of the CPU, in the units returned by sfnt_tsc(), and the
  * cost of sfnt_tsc().
  */
 extern int sfnt_tsc_get_params(struct sfnt_tsc_params*);
+
+/* These two functions are equivalent to sfnt_tsc_get_params(), however their
+ * separation allows for useful work to be done while waiting for the timing
+ * to calibrate. Note that _end may be called multiple times after a single
+ * _begin to obtain increasingly accurate estimations of the TSC frequency */
+extern void sfnt_tsc_get_params_begin(struct sfnt_tsc_measure* measure);
+extern int sfnt_tsc_get_params_end(const struct sfnt_tsc_measure* measure,
+                                   struct sfnt_tsc_params* params,
+                                   int interval_usec);
 
 /* Convert tsc delta to milliseconds. */
 extern int64_t sfnt_tsc_msec(const struct sfnt_tsc_params*, int64_t tsc);
@@ -403,6 +418,9 @@ extern int sfnt_ip_add_membership(int sock, int af, const char* mcast_addr,
 
 /* Set socket timeout.  [send_or_recv] must be SO_RCVTIMEO or SO_SNDTIMEO. */
 extern int sfnt_sock_set_timeout(int sock, int send_or_recv, int millisec);
+
+extern int sfnt_sock_cork(int fd);
+extern int sfnt_sock_uncork(int fd);
 
 extern void sfnt_sock_put_int(int fd, int v);
 extern int  sfnt_sock_get_int(int fd);
