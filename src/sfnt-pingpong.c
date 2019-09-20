@@ -1326,6 +1326,7 @@ static int do_client2(int ss, const char* hostport, int local)
   int msg_size;
   int* results;
   int i, one = 1;
+  uint64_t old_tsc_hz;
 
   client_check_ver(ss);
 
@@ -1433,7 +1434,10 @@ static int do_client2(int ss, const char* hostport, int local)
   }
 
   do_warmup(ss, read_fd, write_fd);
+  old_tsc_hz = tsc.hz;
   NT_TRY(sfnt_tsc_get_params_end(&tsc_measure, &tsc, 50000));
+  if( fabs((double)(int64_t)(tsc.hz - old_tsc_hz) / old_tsc_hz) > .01 )
+    printf("# WARNING: tsc_hz changed to %"PRIu64" on recheck\n", tsc.hz);
   for( i = 0; i < msg_sizes.len; ++i )
     do_test(ss, read_fd, write_fd, msg_sizes.list[i], results);
 
