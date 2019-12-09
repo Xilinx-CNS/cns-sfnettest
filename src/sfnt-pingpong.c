@@ -82,6 +82,8 @@ static unsigned    cfg_msg_more[2];
 static unsigned    cfg_v6only[2];
 static int         cfg_ipv4;
 static int         cfg_ipv6;
+static unsigned    cfg_ovl[2];
+static unsigned    cfg_ovl_wait[2];
 
 /* CL1* args take a single value (either applying to both client and server
  * or just one end).  CL2* args take either one value (used for both client
@@ -149,6 +151,12 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL2F("v6only",      cfg_v6only,      "enable IPV6_V6ONLY sockopt"          ),
   CL1F("ipv4",        cfg_ipv4,        "use IPv4 only"                       ),
   CL1F("ipv6",        cfg_ipv6,        "use IPv6 only"                       ),
+  CL2F("ovl", cfg_ovl,
+       "Enables overlapped reads. "
+       "0 - disables feature. Relevant for muxer zf only."),
+  CL2U("ovl-wait", cfg_ovl_wait,
+       "Specifies length of payload to wait for. Requires cfg-ovl being enabled."
+       "0 - disables waiting (complete event only). Relevant for muxer zf only."),
 };
 
 
@@ -325,21 +333,37 @@ static ssize_t sfn_write(union handle h, const void* buf, size_t len, int flags)
 #ifdef USE_ZF
 static ssize_t rfn_zfur_recv(union handle h, void* buf, size_t len, int flags)
 {
-  struct {
-    struct zfur_msg zcr;
-    struct iovec iov[6];
-  } rd;
-  rd.zcr.iovcnt = 6;
-
   int got = 0, all = flags & MSG_WAITALL;
-  flags = 0;
+  int ovl = flags & ZF_OVERLAPPED_WAIT;
   int i;
 
   do {
+    struct {
+      struct zfur_msg zcr;
+      struct iovec iov[6];
+    } rd;
+    rd.zcr.iovcnt = 6;
+
     if( !zf_mux )
       while(zf_reactor_perform(ztack) == 0);
 
-    zfur_zc_recv(h.ur, &rd.zcr, flags);
+
+    /* in case of ovl do not wait if ovl_len is 0 */
+    if( ! ovl || cfg_ovl_wait[0] != 0 ) {
+      rd.zcr.iov[0].iov_len = cfg_ovl_wait[0];
+      zfur_zc_recv(h.ur, &rd.zcr, ovl ? ZF_OVERLAPPED_WAIT : 0);
+      if( rd.zcr.iovcnt == 0 ) {
+        ovl = 0; continue;
+      }
+    }
+
+    if( ovl ) {
+      zfur_zc_recv(h.ur, &rd.zcr, ZF_OVERLAPPED_COMPLETE);
+      if( rd.zcr.iovcnt == 0 ) {
+        ovl = 0; continue;
+      }
+    }
+
     for(i = 0; i < rd.zcr.iovcnt; i++)
       got += rd.zcr.iov[i].iov_len;
 
@@ -897,6 +921,8 @@ static ssize_t poll_recv(union handle h, void* buf, size_t len, int flags)
 
 #if NT_HAVE_EPOLL
 
+static unsigned muxer_events = EPOLLIN /* ?? | EPOLLET */;
+
 static void epoll_init(void)
 {
   NT_TRY2(epoll_fd, epoll_create(1));
@@ -906,7 +932,7 @@ static void epoll_init(void)
 static void epoll_add(int fd)
 {
   struct epoll_event e;
-  e.events = EPOLLIN /* ?? | EPOLLET */;
+  e.events = muxer_events;
   NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &e));
 }
 
@@ -935,7 +961,14 @@ static ssize_t epolltype_recv(union handle h, void* buf, size_t len, int flags)
   do {
     rc = sfnt_epolltype_wait(mh, mh_type, &e, 1, timeout_ms, &tsc, mux_flags);
     if( rc == 1 ) {
-      NT_TEST(e.events & EPOLLIN);
+      NT_TEST(e.events & muxer_events);
+#ifdef USE_ZF
+      if( e.events & ZF_EPOLLIN_OVERLAPPED ) {
+        if( (rc = do_recv(h, (char*) buf + got, len - got, ZF_OVERLAPPED_WAIT )) > 0 )
+          got += rc;
+      }
+      else
+#endif
       if( (rc = do_recv(h, (char*) buf + got, len - got, flags)) > 0 )
         got += rc;
     }
@@ -961,7 +994,7 @@ static ssize_t epoll_mod_recv(union handle h, void* buf, size_t len, int flags)
 
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
-  e.events = EPOLLIN;
+  e.events = muxer_events;
   NT_TRY(epoll_ctl(epoll_fd, EPOLL_CTL_MOD, h.fd, &e));
   do {
     rc = sfnt_epolltype_wait(mh, HT_EPOLL, &e, 1, timeout_ms, &tsc, mux_flags);
@@ -1026,6 +1059,8 @@ static ssize_t epoll_adddel_recv(union handle h, void* buf, size_t len,
 static void zf_mux_init(void)
 {
   NT_TRY(zf_muxer_alloc(ztack, &zf_mux));
+  if( cfg_ovl[0] )
+    muxer_events |= ZF_EPOLLIN_OVERLAPPED;
 }
 #endif
 
@@ -1496,7 +1531,7 @@ static void add_zocket(union handle h)
 
   if( zf_mux ) {
     struct epoll_event e;
-    e.events = EPOLLIN;
+    e.events = muxer_events;
 
     struct zf_waitable* w = NULL;  /* Initialise to placate compiler. */
     if( handle_type == HT_ZF_UDP ) {
@@ -1632,6 +1667,8 @@ static void client_send_opts(int ss)
   sfnt_sock_put_int(ss, cfg_busy_poll[1]);
   sfnt_sock_put_int(ss, cfg_msg_more[1]);
   sfnt_sock_put_int(ss, cfg_v6only[1]);
+  sfnt_sock_put_int(ss, cfg_ovl[1]);
+  sfnt_sock_put_int(ss, cfg_ovl_wait[1]);
   sfnt_sock_uncork(ss);
 }
 
@@ -1667,6 +1704,8 @@ static void server_recv_opts(int ss)
   cfg_busy_poll[0] = sfnt_sock_get_int(ss);
   cfg_msg_more[0] = sfnt_sock_get_int(ss);
   cfg_v6only[0] = sfnt_sock_get_int(ss);
+  cfg_ovl[0] = sfnt_sock_get_int(ss);
+  cfg_ovl_wait[0] = sfnt_sock_get_int(ss);
   if( cfg_msg_more[0] && MSG_MORE == 0 )
     sfnt_fail_usage("ERROR: MSG_MORE not supported on this platform");
 }
