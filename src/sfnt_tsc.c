@@ -146,6 +146,16 @@ int64_t sfnt_nsec_tsc(const struct sfnt_tsc_params* params, int64_t nsecs)
 }
 
 
+void sfnt_tsc_nsleep(const struct sfnt_tsc_params* params, int64_t nsecs)
+{
+  uint64_t start, stop, spin_stop;
+  spin_stop = sfnt_nsec_tsc(params, nsecs);
+  sfnt_tsc(&start);
+  do {
+    sfnt_tsc(&stop);
+  } while( stop - start < spin_stop );
+}
+
 void sfnt_tsc_usleep(const struct sfnt_tsc_params* params, int64_t usecs)
 {
   uint64_t start, stop, spin_stop;
@@ -155,3 +165,4 @@ void sfnt_tsc_usleep(const struct sfnt_tsc_params* params, int64_t usecs)
     sfnt_tsc(&stop);
   } while( stop - start < spin_stop );
 }
+

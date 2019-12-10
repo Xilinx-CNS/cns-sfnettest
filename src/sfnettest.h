@@ -326,6 +326,9 @@ extern int64_t sfnt_nsec_tsc(const struct sfnt_tsc_params* params,
 extern void sfnt_tsc_usleep(const struct sfnt_tsc_params* params, 
                             int64_t usecs);
 
+extern void sfnt_tsc_nsleep(const struct sfnt_tsc_params* params,
+                            int64_t nsecs);
+
 /**********************************************************************
  * Statistics.
  */

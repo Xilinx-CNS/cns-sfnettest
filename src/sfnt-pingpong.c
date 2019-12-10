@@ -84,6 +84,7 @@ static int         cfg_ipv4;
 static int         cfg_ipv6;
 static unsigned    cfg_ovl[2];
 static unsigned    cfg_ovl_wait[2];
+static unsigned    cfg_compute_nsec[2];
 
 /* CL1* args take a single value (either applying to both client and server
  * or just one end).  CL2* args take either one value (used for both client
@@ -157,6 +158,9 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL2U("ovl-wait", cfg_ovl_wait,
        "Specifies length of payload to wait for. Requires cfg-ovl being enabled."
        "0 - disables waiting (complete event only). Relevant for muxer zf only."),
+  CL2U("compute", cfg_compute_nsec,
+       "Number of nanoseconds to simulate CPU-intensive work after zf recv "
+       "0 - disables feature. Relevant for muxer zf only."),
 };
 
 
@@ -355,6 +359,10 @@ static ssize_t rfn_zfur_recv(union handle h, void* buf, size_t len, int flags)
       if( rd.zcr.iovcnt == 0 ) {
         ovl = 0; continue;
       }
+    }
+
+    if( cfg_compute_nsec[0] ) {
+      sfnt_tsc_nsleep(&tsc, cfg_compute_nsec[0]);
     }
 
     if( ovl ) {
@@ -1669,6 +1677,7 @@ static void client_send_opts(int ss)
   sfnt_sock_put_int(ss, cfg_v6only[1]);
   sfnt_sock_put_int(ss, cfg_ovl[1]);
   sfnt_sock_put_int(ss, cfg_ovl_wait[1]);
+  sfnt_sock_put_int(ss, cfg_compute_nsec[1]);
   sfnt_sock_uncork(ss);
 }
 
@@ -1706,6 +1715,7 @@ static void server_recv_opts(int ss)
   cfg_v6only[0] = sfnt_sock_get_int(ss);
   cfg_ovl[0] = sfnt_sock_get_int(ss);
   cfg_ovl_wait[0] = sfnt_sock_get_int(ss);
+  cfg_compute_nsec[0] = sfnt_sock_get_int(ss);
   if( cfg_msg_more[0] && MSG_MORE == 0 )
     sfnt_fail_usage("ERROR: MSG_MORE not supported on this platform");
 }
