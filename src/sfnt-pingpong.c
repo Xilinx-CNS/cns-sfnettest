@@ -397,44 +397,54 @@ static ssize_t sfn_zfut_send(union handle h, const void* buf, size_t len,
 
 static ssize_t rfn_zft_recv(union handle h, void* buf, size_t len, int flags)
 {
-  struct {
-    struct zft_msg zcr;
-    struct iovec iov[6];
-  } rd;
-  int in_iovcnt = sizeof(rd.iov)/sizeof(rd.iov[0]);
-
   int got = 0, all = flags & MSG_WAITALL;
-  flags = 0;
+  int ovl = flags & ZF_OVERLAPPED_WAIT;
   int i;
- 
-  do {
-    rd.zcr.iovcnt = in_iovcnt;
 
+  do {
     if( !zf_mux )
       while(zf_reactor_perform(ztack) == 0);
-
-    zft_zc_recv(h.t, &rd.zcr, flags);
-
-    for(i = 0; i < rd.zcr.iovcnt; i++)
-      got += rd.zcr.iov[i].iov_len;
-
-    if( rd.zcr.iovcnt )
-      zft_zc_recv_done(h.t, &rd.zcr);
-
-    rd.zcr.iovcnt = in_iovcnt;
 
     /* zf_reactor perform is edge triggered so we need to ensure we've fully
      * drained our recv queue before spinning on it.  That means we need to
      * make 2 calls to zft_zc_recv as if we have data queued over the point at
      * which the ring wraps it will be split into batches.
      */
-    zft_zc_recv(h.t, &rd.zcr, flags);
+    for( int repeat = 0; repeat < 2; ++ repeat ) {
+      struct {
+        struct zft_msg zcr;
+        struct iovec iov[6];
+      } rd;
+      int in_iovcnt = sizeof(rd.iov)/sizeof(rd.iov[0]);
+      rd.zcr.iovcnt = in_iovcnt;
 
-    for(i = 0; i < rd.zcr.iovcnt; i++)
-      got += rd.zcr.iov[i].iov_len;
+      /* in case of ovl do not wait if ovl_len is 0 */
+      if( ! ovl || cfg_ovl_wait[0] != 0 ) {
+        rd.zcr.iov[0].iov_len = cfg_ovl_wait[0];
 
-    if( rd.zcr.iovcnt )
+        zft_zc_recv(h.t, &rd.zcr, ovl ? ZF_OVERLAPPED_WAIT : 0);
+        if( rd.zcr.iovcnt == 0 ) {
+          ovl = 0; break;
+        }
+      }
+
+      if( cfg_compute_nsec[0] ) {
+        sfnt_tsc_nsleep(&tsc, cfg_compute_nsec[0]);
+      }
+
+      if( ovl ) {
+        zft_zc_recv(h.t, &rd.zcr, ZF_OVERLAPPED_COMPLETE);
+        if( rd.zcr.iovcnt == 0 ) {
+          ovl = 0; break;
+        }
+      }
+
+      for(i = 0; i < rd.zcr.iovcnt; i++)
+        got += rd.zcr.iov[i].iov_len;
+
       zft_zc_recv_done(h.t, &rd.zcr);
+      ovl = 0;
+    }
   } while( all && got < len );
 
   return got;
