@@ -12,45 +12,70 @@
 #include "sfnettest.h"
 
 
-static uint64_t measure_hz(int interval_usec)
+static void measure_begin(struct sfnt_tsc_measure* measure)
 {
-  struct timeval tv_s, tv_e;
-  uint64_t tsc_s, tsc_e, tsc_e2;
+  uint64_t t_s;
+  uint64_t tsc_s, tsc_e2;
   uint64_t tsc_gtod, min_tsc_gtod;
-  uint64_t usec = 0;  /* Initialise to placate compiler. */
-  int n, skew = 0;
+  int n;
 
   sfnt_tsc(&tsc_s);
-  gettimeofday(&tv_s, NULL);
+  t_s = monotonic_clock();
   sfnt_tsc(&tsc_e2);
   min_tsc_gtod = tsc_e2 - tsc_s;
   n = 0;
   do {
     sfnt_tsc(&tsc_s);
-    gettimeofday(&tv_s, NULL);
+    t_s = monotonic_clock();
     sfnt_tsc(&tsc_e2);
     tsc_gtod = tsc_e2 - tsc_s;
     if( tsc_gtod < min_tsc_gtod )
       min_tsc_gtod = tsc_gtod;
   } while( ++n < 20 || (tsc_gtod > min_tsc_gtod * 2 && n < 100) );
 
+  measure->min_tsc_gtod = min_tsc_gtod;
+  measure->t_s = t_s;
+  measure->tsc_s = tsc_s;
+}
+
+
+static uint64_t measure_end(const struct sfnt_tsc_measure* measure,
+                                     int interval_usec)
+{
+  uint64_t t_s = measure->t_s;
+  uint64_t min_tsc_gtod = measure->min_tsc_gtod;
+  uint64_t tsc_s = measure->tsc_s;
+  uint64_t t_freq = monotonic_clock_freq();
+  uint64_t t_interval = interval_usec * t_freq / 1000000;
+  uint64_t t_e;
+  uint64_t tsc_e, tsc_e2;
+  uint64_t tsc_gtod, ticks;
+  int n = 0, skew = 0;
+
   do {
     sfnt_tsc(&tsc_e);
-    gettimeofday(&tv_e, NULL);
+    t_e = monotonic_clock();
     sfnt_tsc(&tsc_e2);
     if( tsc_e2 < tsc_e ) {
       skew = 1;
       break;
     }
     tsc_gtod = tsc_e2 - tsc_e;
-    usec = (tv_e.tv_sec - tv_s.tv_sec) * (uint64_t) 1000000;
-    usec += tv_e.tv_usec - tv_s.tv_usec;
-  } while( usec < interval_usec || tsc_gtod > min_tsc_gtod * 2 );
+    ticks = t_e - t_s;
+  } while( ++n < 20 || ticks < t_interval || tsc_gtod > min_tsc_gtod * 2 );
 
   /* ?? TODO: handle this better */
   NT_TEST(skew == 0);
 
-  return (tsc_e - tsc_s) * 1000000 / usec;
+  return (tsc_e - tsc_s) * t_freq / ticks;
+}
+
+
+static uint64_t measure_hz(int interval_usec)
+{
+  struct sfnt_tsc_measure measure;
+  measure_begin(&measure);
+  return measure_end(&measure, interval_usec);
 }
 
 
@@ -62,8 +87,23 @@ static uint64_t measure_tsc(void)
 
 int sfnt_tsc_get_params(struct sfnt_tsc_params* params)
 {
-  measure_hz(100000);
   params->hz = measure_hz(100000);
+  params->tsc_cost = measure_tsc();
+
+  return 0;
+}
+
+
+void sfnt_tsc_get_params_begin(struct sfnt_tsc_measure* measure)
+{
+  measure_begin(measure);
+}
+
+
+int sfnt_tsc_get_params_end(const struct sfnt_tsc_measure* measure,
+                            struct sfnt_tsc_params* params, int interval_usec)
+{
+  params->hz = measure_end(measure, interval_usec);
   params->tsc_cost = measure_tsc();
 
   return 0;

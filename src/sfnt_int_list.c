@@ -10,7 +10,6 @@
 \**************************************************************************/
 
 #include "sfnettest.h"
-#include <ctype.h>
 
 
 static void skip_int(const char** ps)

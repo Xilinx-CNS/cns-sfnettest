@@ -17,10 +17,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <inttypes.h>
 #include <assert.h>
 #include <math.h>
 #include <errno.h>
+#include <ctype.h>
+
+#if defined(__GNUC__)
+# include "sfnettest_gcc.h"
+#elif defined(_MSC_VER)
+# include "sfnettest_msvc.h"
+#endif
 
 #if defined(__unix__) || defined(__APPLE__)
 # include "sfnettest_unix.h"
@@ -30,8 +36,9 @@
 # error "Unknown platform"
 #endif
 
-#ifdef __GNUC__
-# include "sfnettest_gcc.h"
+
+#ifndef SO_BUSY_POLL
+#define SO_BUSY_POLL 46
 #endif
 
 
@@ -230,6 +237,26 @@ enum handle_type {
   HT_DPDK_UDP = 9 | 0         | 0         | 0          | HTF_DPDK | 0,
 };
 
+/* Version of NT_TRY() macro that handles errors from
+ * the getaddrinfo(3) family of functions
+ */
+#define NT_TRY_GAI(x)                                           \
+do {                                                            \
+  int __rc;                                                     \
+  if( (__rc = (x)) != 0 ) {                                     \
+    sfnt_err("ERROR: at %s:%d\n", __FILE__, __LINE__);          \
+    sfnt_err("ERROR: %s failed\n", #x);                         \
+    if ( __rc == EAI_SYSTEM )                                   \
+      sfnt_err("ERROR: rc=%d errno=(%d %s)\n", (int) __rc,      \
+           errno, strerror(errno));                             \
+    else                                                        \
+      sfnt_err("ERROR: rc=%d (%s)\n", (int) __rc,               \
+           gai_strerror(__rc));                                 \
+    sfnt_fail_test();                                           \
+  }                                                             \
+} while(0)
+
+
 /**********************************************************************
  * Information about the test environment.
  */
@@ -254,10 +281,25 @@ struct sfnt_tsc_params {
   uint64_t  tsc_cost;
 };
 
+struct sfnt_tsc_measure {
+  uint64_t t_s;
+  uint64_t tsc_s;
+  uint64_t min_tsc_gtod;
+};
+
 /* Measure the speed of the CPU, in the units returned by sfnt_tsc(), and the
  * cost of sfnt_tsc().
  */
 extern int sfnt_tsc_get_params(struct sfnt_tsc_params*);
+
+/* These two functions are equivalent to sfnt_tsc_get_params(), however their
+ * separation allows for useful work to be done while waiting for the timing
+ * to calibrate. Note that _end may be called multiple times after a single
+ * _begin to obtain increasingly accurate estimations of the TSC frequency */
+extern void sfnt_tsc_get_params_begin(struct sfnt_tsc_measure* measure);
+extern int sfnt_tsc_get_params_end(const struct sfnt_tsc_measure* measure,
+                                   struct sfnt_tsc_params* params,
+                                   int interval_usec);
 
 /* Convert tsc delta to milliseconds. */
 extern int64_t sfnt_tsc_msec(const struct sfnt_tsc_params*, int64_t tsc);
@@ -347,23 +389,51 @@ extern int sfnt_epolltype_wait(union handle h, enum handle_type h_type,
  * Port is determined as follows: Use [port_or_null] unless it is NULL.
  * Otherwise use [port_i_or_neg] unless it is negative.  Otherwise if
  * [host_or_hostport] has a ":port" suffix than that is used as the port.
+ * Hostnames in square brackets and with scope identifiers are understood.
  * Otherwise the port is 0.
+ *
+ * On error, returns getaddrinfo-style return code.
  */
-extern int sfnt_getaddrinfo(const char* host_or_hostport,
+extern int sfnt_getaddrinfo(int hint_af, const char* host_or_hostport,
                             const char* port_or_null, int port_i_or_neg,
                             struct addrinfo**ai_out);
+
+/* As sfnt_getaddrinfo() but if the port is omitted then default_port is
+ * used, i.e. sfnt_getaddrinfo will favour the parameter over a port
+ * specified in the host_or_hostport whereas this function will allow
+ * host_or_hostport to override default_port.
+ *
+ * On error, returns getaddrinfo-style return code.
+ */
+extern int sfnt_getendpointinfo(int hint_af, const char* host_or_hostport,
+                                int default_port, struct addrinfo**ai_out);
+
+/* Calls sfnt_getendpointinfo() and populates a single struct sockaddr,
+ * returning the length of the address.
+ *
+ * Catches errors, including failure to resolve.
+ */
+extern socklen_t sfnt_getendpoint(int hint_af, const char* host_or_hostport,
+				  int default_port, struct sockaddr *addr,
+				  socklen_t addrlen);
 
 /* Get port number socket is bound to. */
 extern int sfnt_get_port(int sock);
 
 /* Bind socket to given port and INADDR_ANY. */
-extern int sfnt_bind_port(int sock, int port);
+extern int sfnt_bind_port(int sock, int af, int port);
 
-/* Port selected as for sfnt_getaddrinfo(). */
+/* Port selected as for sfnt_getaddrinfo().
+ *
+ * On error, returns getaddrinfo-style return code.
+ */
 extern int sfnt_bind(int sock, const char* host_or_hostport,
                      const char* port_or_null, int port_i_or_neg);
 
-/* Port selected as for sfnt_getaddrinfo(). */
+/* Port selected as for sfnt_getaddrinfo().
+ *
+ * On error, returns getaddrinfo-style return code.
+ */
 extern int sfnt_connect(int sock, const char* host_or_hostport,
                         const char* port_or_null, int port_i_or_neg);
 
@@ -374,25 +444,32 @@ extern int sfnt_so_bindtodevice(int sock, const char* intf);
 
 /* Set the IP_MULTICAST_IF socket option.  [intf] may be an interface name
  * (eg. "eth3"), or a hostname or IP address of a local interface.
+ *
+ * On error, returns getaddrinfo-style return code.
  */
-extern int sfnt_ip_multicast_if(int sock, const char* intf);
+extern int sfnt_ip_multicast_if(int sock, int af, const char* intf);
 
 /* Do setsockopt(IP_ADD_MEMBERSHIP).  [intf_opt] may be an interface name
  * (eg. "eth3"), or a hostname or IP address of a local interface, or NULL
  * (in which case the routing table is used to choose the interface).
+ *
+ * On error, returns getaddrinfo-style return code.
  */
-extern int sfnt_ip_add_membership(int sock, in_addr_t mcast_addr,
+extern int sfnt_ip_add_membership(int sock, int af, const char* mcast_addr,
                                 const char* intf_opt);
 
 /* Set socket timeout.  [send_or_recv] must be SO_RCVTIMEO or SO_SNDTIMEO. */
 extern int sfnt_sock_set_timeout(int sock, int send_or_recv, int millisec);
 
+extern int sfnt_sock_cork(int fd);
+extern int sfnt_sock_uncork(int fd);
+
 extern void sfnt_sock_put_int(int fd, int v);
 extern int  sfnt_sock_get_int(int fd);
 extern void  sfnt_sock_put_str(int fd, const char* str);
 extern char* sfnt_sock_get_str(int fd);
-extern void sfnt_sock_put_sockaddr_in(int fd, const struct sockaddr_in*);
-extern void sfnt_sock_get_sockaddr_in(int fd, struct sockaddr_in*);
+extern void sfnt_sock_put_sockaddr(int fd, const struct sockaddr_storage*);
+extern void sfnt_sock_get_sockaddr(int fd, struct sockaddr_storage*);
 
 
 /**********************************************************************

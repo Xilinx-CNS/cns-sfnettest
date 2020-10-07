@@ -1,5 +1,5 @@
 
-CFLAGS		+= -Wall -Werror
+CFLAGS		+= -Wall -Werror -g
 
 ifdef OS_LINUX
 # Add symbols to dynamic symbol table.  This is necessary to allow

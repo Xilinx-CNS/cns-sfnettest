@@ -12,6 +12,11 @@
 #ifndef __NETTEST_GCC_H__
 #define __NETTEST_GCC_H__
 
+#include <inttypes.h>
+
+
+#define NT_PRINTF_LIKE(a, b)  __attribute__((format(printf,a,b)))
+
 
 #ifdef __x86_64__
 static inline void sfnt_tsc(uint64_t* pval) {

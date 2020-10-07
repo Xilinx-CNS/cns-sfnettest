@@ -30,6 +30,8 @@
 #include <sys/ioctl.h>
 #if defined(__FreeBSD__)
 # include <sys/endian.h>
+# include <sys/param.h>
+# include <sys/cpuset.h>
 #elif defined(__linux__)
 # include <endian.h>
 #elif defined(__APPLE__)
@@ -41,7 +43,14 @@
 # include <mach/clock.h>
 # include <mach/mach.h>
 #endif
+#if defined(__FreeBSD__)
+#include <stdlib.h>
+#else
+#include <alloca.h>
+#endif
 #include <pthread.h>
+#include <sched.h>
+#include <fcntl.h>
 
 #if defined(__linux__)
 # define NT_SUPPORTS_ONLOAD 1
@@ -66,9 +75,16 @@
 # error "Please define NT_HAVE_SO_BINDTODEVICE for this platform"
 #endif
 
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
+#elif defined(__sun__) || defined(__APPLE__)  || defined(__FreeBSD__)
+# define MSG_MORE 0
+#else
+# error "Please decide whether to define MSG_MORE for this platform"
+#endif
+
+#if defined(__linux__)
 # define NT_HAVE_IP_MREQN 1
-#elif defined(__sun__) || defined(__APPLE__)
+#elif defined(__sun__) || defined(__APPLE__) || defined(__FreeBSD__)
 # define NT_HAVE_IP_MREQN 0
 #else
 # error "Please define NT_HAVE_IP_MREQN for this platform"
@@ -82,9 +98,7 @@
 # error "Please define NT_HAVE_FIONBIO for this platform"
 #endif
 
-#ifdef __GNUC__
-# define NT_PRINTF_LIKE(a, b)  __attribute__((format(printf,a,b)))
-#else
+#ifndef NT_PRINTF_LIKE
 # define NT_PRINTF_LIKE(a, b)
 #endif
 
@@ -110,7 +124,7 @@
 #endif
 
 
-#if defined(__sun__)
+#if defined(__sun__) || defined(__APPLE__) || defined(__FreeBSD__)
 # ifndef __NFDBITS
 #  define __NFDBITS NFDBITS
 # endif
@@ -123,8 +137,38 @@
 #ifdef __APPLE__
 typedef int clockid_t;
 #define CLOCK_REALTIME 0
+#define CLOCK_MONOTONIC 6
 extern int clock_gettime(clockid_t clk_id, struct timespec* ts);
 #endif
 
+#ifdef __FreeBSD__
+/*  On FreeBSD UDP send is non blocking and can fail
+ *  We need to capture the ENOBUFF errors and resend if this occur
+ */
+
+extern ssize_t sfnt_send_freebsd(int sockfd, const void *buf, size_t len, int flags);
+
+extern ssize_t sfnt_sendto_freebsd(int sockfd, const void *buf, size_t len, int flags,
+               const struct sockaddr *dest_addr, socklen_t addrlen);
+
+extern ssize_t sfnt_sendmsg_freebsd(int sockfd, const struct msghdr *msg, int flags);
+
+#define send     sfnt_send_freebsd
+#define sendto   sfnt_sendto_freebsd
+#define sendmsg  sfnt_sendmsg_freebsd
+#endif
+
+static inline uint64_t monotonic_clock_freq(void)
+{
+  return 1000000000;
+}
+
+
+static inline uint64_t monotonic_clock(void)
+{
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return (uint64_t)t.tv_sec * 1000000000 + t.tv_nsec;
+}
 
 #endif  /* __SFNETTEST_UNIX_H__ */

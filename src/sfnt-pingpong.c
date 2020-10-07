@@ -47,6 +47,8 @@ static int         cfg_minms = 1000;
 static int         cfg_maxms = 3000;
 static int         cfg_miniter = 1000;
 static int         cfg_maxiter = 1000000;
+static int         cfg_warmupiter = 10000;
+static int         cfg_warmupms = 500;
 static int         cfg_forkboth;
 static const char* cfg_mcast;
 static const char* cfg_mcast_intf[2];
@@ -64,9 +66,10 @@ static const char* cfg_tcpc_serv;
 static unsigned    cfg_mcast_sleep = 2;
 static unsigned    cfg_timeout[2];
 static const char* cfg_affinity[2];
-static int         cfg_n_pings = 1;
+static int         cfg_n_pings[2] = { 1, 1 };
 static int         cfg_n_pongs = 1;
 static int         cfg_nodelay[2];
+static unsigned    cfg_busy_poll[2];
 static unsigned    cfg_sleep_gap = 0;
 static unsigned    cfg_spin_gap = 0;
 static int         cfg_zc[2];
@@ -75,10 +78,14 @@ static int         cfg_tmpl_send[2] = {-1, -1};
 static const char* cfg_server_type;
 static const char* cfg_dpdk_args;
 static const char* cfg_server_dpdk_args;
+static unsigned    cfg_msg_more[2];
+static unsigned    cfg_v6only[2];
+static int         cfg_ipv4;
+static int         cfg_ipv6;
 
-/* CL1* implies that the cmdline args are the same for both client and
- * server.  CL2* implies that different options can be specified for
- * client and server by using ';'.
+/* CL1* args take a single value (either applying to both client and server
+ * or just one end).  CL2* args take either one value (used for both client
+ * and server) or separate values for client and server separated by ';'.
  */
 #define CL1(a, b, c, d)  SFNT_CLA(a, b, &(c), d)
 #define CL2(a, b, c, d)  SFNT_CLA2(a, b, &(c), d)
@@ -108,6 +115,8 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1I("maxms",       cfg_maxms,       "max time per msg size (ms)"          ),
   CL1I("miniter",     cfg_miniter,     "min iterations for result"           ),
   CL1I("maxiter",     cfg_maxiter,     "max iterations for result"           ),
+  CL1I("warmupiter",  cfg_warmupiter,  "min iterations for warmup"           ),
+  CL1I("warmupms",    cfg_warmupms,    "min time for warmup"                 ),
   CL1S("mcast",       cfg_mcast,       "set multicast address"               ),
   CL2S("mcastintf",   cfg_mcast_intf,  "set multicast interface"             ),
   CL2F("mcastloop",   cfg_mcast_loop,  "IP_MULTICAST_LOOP"                   ),
@@ -122,9 +131,9 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL2U("n-tcpc",      cfg_n_tcpc,      "include TCP socks in fd set"         ),
   CL2U("n-tcpl",      cfg_n_tcpl,      "include TCP listeners in fds"        ),
   CL1S("tcpc-serv",   cfg_tcpc_serv,   "host:port for tcp conns"             ),
-  CL2U("timeout",     cfg_timeout,     "socket SND?RECV timeout"             ),
+  CL2U("timeout",     cfg_timeout,     "socket SND/RECV timeout"             ),
   CL2S("affinity",    cfg_affinity,    "<client-core>;<server-core>"         ),
-  CL1U("n-pings",     cfg_n_pings,     "number of ping messages"             ),
+  CL2U("n-pings",     cfg_n_pings,     "number of ping messages"             ),
   CL1U("n-pongs",     cfg_n_pongs,     "number of pong messages"             ),
   CL2F("nodelay",     cfg_nodelay,     "enable TCP_NODELAY"                  ),
   CL1U("sleep-gap",   cfg_sleep_gap,   "additional gap in microseconds to sleep between iterations"),
@@ -135,6 +144,11 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL1S("server-type", cfg_server_type, "Use different variant for server [udp|zf_udp|dpdk_udp]"),
   CL1S("dpdk-args",   cfg_dpdk_args,   "Specify DPDK arguments. Separate multiple arguments with ';'"),
   CL1S("server-dpdk-args", cfg_server_dpdk_args, "Use different DPDK args for server (otherwise uses same as --dpdk-args)"),
+  CL2U("busy-poll",   cfg_busy_poll,   "SO_BUSY_POLL (in microseconds)"      ),
+  CL2F("more",        cfg_msg_more,    "MSG_MORE for first n-1 pings/pongs"  ),
+  CL2F("v6only",      cfg_v6only,      "enable IPV6_V6ONLY sockopt"          ),
+  CL1F("ipv4",        cfg_ipv4,        "use IPv4 only"                       ),
+  CL1F("ipv6",        cfg_ipv6,        "use IPv6 only"                       ),
 };
 
 
@@ -159,6 +173,7 @@ struct user_info {
 
 #define MAX_FDS            1024
 
+static struct sfnt_tsc_measure tsc_measure;
 static struct sfnt_tsc_params tsc;
 static char           ppbuf[64 * 1024];
 static char           msg_buf[64 * 1024];
@@ -179,10 +194,10 @@ static int              select_fds[MAX_FDS];
 static int              select_n_fds;
 static int              select_max_fd;
 
-static struct sockaddr_in  my_sa;
-static struct sockaddr_in  peer_sa;
-static struct sockaddr*    to_sa;
-static socklen_t           to_sa_len;
+static struct sockaddr_storage  my_sa;
+static struct sockaddr_storage  peer_sa;
+static struct sockaddr*         to_sa;
+static socklen_t                to_sa_len;
 
 /* Timeout for receives in milliseconds, or -1 if blocking forever. */
 static int                 timeout_ms;
@@ -1054,20 +1069,28 @@ static ssize_t warm_recv(union handle h, void* buf, size_t len, int flags)
 
 /**********************************************************************/
 
-static void set_ttl(int sock, int ttl)
+static void set_ttl(int af, int sock, int ttl)
 {
   if( ttl >= 0 ) {
-    unsigned char ttl8 = ttl;
-    int ttl_result;
-    NT_TRY(setsockopt(sock, SOL_IP, IP_MULTICAST_TTL, &ttl8, sizeof(ttl8)));
-    ttl = ttl ? ttl : 1;
-    /* Sol10 and Sol11 disagree on the valid size of this argument.
-     * so try both. */
-    ttl8 = ttl8 ? ttl8 : 1;
-    ttl_result = setsockopt(sock, SOL_IP, IP_TTL, &ttl8, sizeof(ttl8));
-    if( ttl_result<0 )
-      ttl_result = setsockopt(sock, SOL_IP, IP_TTL, &ttl, sizeof(ttl));
-    NT_TRY(ttl_result);
+    if( af == AF_INET6 ) {
+      NT_TRY(setsockopt(sock, IPPROTO_IPV6, IPV6_UNICAST_HOPS,
+                        &ttl, sizeof(ttl)));
+      NT_TRY(setsockopt(sock, IPPROTO_IPV6, IPV6_MULTICAST_HOPS,
+                        &ttl, sizeof(ttl)));
+    }
+    else {
+      unsigned char ttl8 = ttl;
+      int ttl_result;
+      NT_TRY(setsockopt(sock, SOL_IP, IP_MULTICAST_TTL, &ttl8, sizeof(ttl8)));
+      ttl = ttl ? ttl : 1;
+      /* Sol10 and Sol11 disagree on the valid size of this argument.
+      * so try both. */
+      ttl8 = ttl8 ? ttl8 : 1;
+      ttl_result = setsockopt(sock, SOL_IP, IP_TTL, &ttl8, sizeof(ttl8));
+      if( ttl_result<0 )
+        ttl_result = setsockopt(sock, SOL_IP, IP_TTL, &ttl, sizeof(ttl));
+      NT_TRY(ttl_result);
+    }
   }
 }
 
@@ -1208,8 +1231,7 @@ static void do_init(void)
   }
 
   /* Set affinity first to ensure optimal locality. */
-
-  if( strcasecmp(cfg_affinity[0], "any") )
+  if( cfg_affinity[0] && strcasecmp(cfg_affinity[0], "any") )
     if( sscanf(cfg_affinity[0], "%u", &core_i) == 1 )
       if( ! (handle_type & HTF_DPDK) )
         if( sfnt_cpu_affinity_set(core_i) != 0 ) {
@@ -1218,8 +1240,6 @@ static void do_init(void)
           sfnt_fail_setup();
         }
 
-
-  NT_TRY(sfnt_tsc_get_params(&tsc));
 
   if( handle_type == HT_UDP && ! cfg_connect[0] ) {
     if( cfg_tmpl_send[0] != -1 ) {
@@ -1399,9 +1419,19 @@ static void do_init(void)
 }
 
 
+static int recv_size(int sz)
+{
+#ifdef __sun__
+  return sz ? sz : 1;
+#else
+  return sz;
+#endif
+}
+
+
 static void do_ping(union handle read_h, union handle write_h, int sz)
 {
-  int i, rc;
+  int i, rc, send_flags = cfg_msg_more[0] ? MSG_MORE : 0;
 
   zc_msg.msg_name = NULL;
   zc_msg.msg_namelen = 0;
@@ -1412,20 +1442,23 @@ static void do_ping(union handle read_h, union handle write_h, int sz)
   zc_msg.msg_iov->iov_base = msg_buf;
   zc_msg.msg_iov->iov_len = sz;
 
-  for( i = 0; i < cfg_n_pings; ++i ) {
-    rc = do_send(write_h, ppbuf, sz, 0);
+  for( i = 0; i < cfg_n_pings[0] - 1; ++i ) {
+    rc = do_send(write_h, ppbuf, sz, send_flags);
     NT_TESTi3(rc, ==, sz);
   }
+  rc = do_send(write_h, ppbuf, sz, 0);
+  NT_TESTi3(rc, ==, sz);
   for( i = 0; i < cfg_n_pongs; ++i ) {
-    rc = mux_recv(read_h, ppbuf, sz, MSG_WAITALL);
+    rc = mux_recv(read_h, ppbuf, recv_size(sz), MSG_WAITALL);
     NT_TESTi3(rc, ==, sz);
   }
 }
 
 
-static void do_pong(union handle read_h, union handle write_h, int sz)
+static void do_pong(union handle read_h, union handle write_h, int recv_sz,
+                    int send_sz)
 {
-  int i, rc;
+  int i, rc, send_flags = cfg_msg_more[0] ? MSG_MORE : 0;
 
   zc_msg.msg_name = NULL;
   zc_msg.msg_namelen = 0;
@@ -1434,21 +1467,18 @@ static void do_pong(union handle read_h, union handle write_h, int sz)
   zc_msg.msg_control = 0;
   zc_msg.msg_controllen = 0;
   zc_msg.msg_iov->iov_base = msg_buf;
-  zc_msg.msg_iov->iov_len = sz;
+  zc_msg.msg_iov->iov_len = recv_size(recv_sz);
 
-  for( i = 0; i < cfg_n_pings; ++i ) {
-#ifdef __sun__
-    /* NB. Solaris doesn't block in UDP recv with 0 length buffer. */
-    rc = mux_recv(read_h, ppbuf, sz ? sz : 1, MSG_WAITALL);
-#else
-    rc = mux_recv(read_h, ppbuf, sz, MSG_WAITALL);
-#endif
-    NT_TESTi3(rc, ==, sz);
+  for( i = 0; i < cfg_n_pings[0]; ++i ) {
+    rc = mux_recv(read_h, ppbuf, recv_size(recv_sz), MSG_WAITALL);
+    NT_TESTi3(rc, ==, recv_sz);
   }
-  for( i = 0; i < cfg_n_pongs; ++i ) {
-    rc = do_send(write_h, ppbuf, sz, 0);
-    NT_TESTi3(rc, ==, sz);
+  for( i = 0; i < cfg_n_pongs - 1; ++i ) {
+    rc = do_send(write_h, ppbuf, send_sz, send_flags);
+    NT_TESTi3(rc, ==, send_sz);
   }
+  rc = do_send(write_h, ppbuf, send_sz, 0);
+  NT_TESTi3(rc, ==, send_sz);
 }
 
 
@@ -1524,11 +1554,17 @@ static void add_fds(int us)
     NT_TRY2(sock, socket(PF_INET, SOCK_DGRAM, 0));
     mux_add(sock);
   }
-  for( i = 0; i < cfg_n_tcpc[0]; ++i ) {
-    NT_TRY2(sock, socket(PF_INET, SOCK_STREAM, 0));
-    NT_TRY(sfnt_connect(sock, cfg_tcpc_serv, NULL, -1));
-    mux_add(sock);
+  if( cfg_tcpc_serv ) {
+    for( i = 0; i < cfg_n_tcpc[0]; ++i ) {
+      NT_TRY2(sock, socket(PF_INET, SOCK_STREAM, 0));
+      NT_TRY_GAI(sfnt_connect(sock, cfg_tcpc_serv, NULL, -1));
+      mux_add(sock);
+    }
+  } else if( cfg_n_tcpc[0] > 0 ) {
+    sfnt_err("ERROR: --n-tcpc specified, but no --tcpc-serv address\n" );
+    sfnt_fail_test();
   }
+
   for( i = 0; i < cfg_n_tcpl[0]; ++i ) {
     NT_TRY2(sock, socket(PF_INET, SOCK_STREAM, 0));
     NT_TRY(listen(sock, 1));
@@ -1557,13 +1593,16 @@ static void client_check_ver(int ss)
 
 static void server_check_ver(int ss)
 {
+  sfnt_sock_cork(ss);
   sfnt_sock_put_str(ss, SFNT_VERSION);
   sfnt_sock_put_str(ss, SFNT_SRC_CSUM);
+  sfnt_sock_uncork(ss);
 }
 
 
 static void client_send_opts(int ss)
 {
+  sfnt_sock_cork(ss);
   sfnt_sock_put_int(ss, remote_handle_type);
   sfnt_sock_put_int(ss, cfg_connect[1]);
   sfnt_sock_put_int(ss, cfg_spin[1]);
@@ -1582,13 +1621,18 @@ static void client_send_opts(int ss)
   sfnt_sock_put_int(ss, cfg_n_tcpl[1]);
   sfnt_sock_put_int(ss, cfg_timeout[1]);
   sfnt_sock_put_str(ss, cfg_affinity[1]);
-  sfnt_sock_put_int(ss, cfg_n_pings);
+  sfnt_sock_put_int(ss, cfg_n_pings[1]);
+  sfnt_sock_put_int(ss, cfg_n_pings[0]);
   sfnt_sock_put_int(ss, cfg_n_pongs);
   sfnt_sock_put_int(ss, cfg_nodelay[1]);
   sfnt_sock_put_int(ss, cfg_zc[1]);
   sfnt_sock_put_int(ss, cfg_warm[1]);
   sfnt_sock_put_int(ss, cfg_tmpl_send[1]);
   sfnt_sock_put_str(ss, cfg_server_dpdk_args);
+  sfnt_sock_put_int(ss, cfg_busy_poll[1]);
+  sfnt_sock_put_int(ss, cfg_msg_more[1]);
+  sfnt_sock_put_int(ss, cfg_v6only[1]);
+  sfnt_sock_uncork(ss);
 }
 
 
@@ -1612,13 +1656,19 @@ static void server_recv_opts(int ss)
   cfg_n_tcpl[0] = sfnt_sock_get_int(ss);
   cfg_timeout[0] = sfnt_sock_get_int(ss);
   cfg_affinity[0] = sfnt_sock_get_str(ss);
-  cfg_n_pings = sfnt_sock_get_int(ss);
+  cfg_n_pings[0] = sfnt_sock_get_int(ss);
+  cfg_n_pings[1] = sfnt_sock_get_int(ss);
   cfg_n_pongs = sfnt_sock_get_int(ss);
   cfg_nodelay[0] = sfnt_sock_get_int(ss);
   cfg_zc[0] = sfnt_sock_get_int(ss);
   cfg_warm[0] = sfnt_sock_get_int(ss);
   cfg_tmpl_send[0] = sfnt_sock_get_int(ss);
   cfg_dpdk_args = sfnt_sock_get_str(ss);
+  cfg_busy_poll[0] = sfnt_sock_get_int(ss);
+  cfg_msg_more[0] = sfnt_sock_get_int(ss);
+  cfg_v6only[0] = sfnt_sock_get_int(ss);
+  if( cfg_msg_more[0] && MSG_MORE == 0 )
+    sfnt_fail_usage("ERROR: MSG_MORE not supported on this platform");
 }
 
 
@@ -1631,11 +1681,12 @@ static void zf_udp_setup_addrs(int ss)
 
   /* Use the same local interface as the setup socket */
   NT_TRY(getsockname(ss, (struct sockaddr*) &my_sa, &my_sa_len));
-  my_sa.sin_port = 11111;
+  NT_TESTi3(my_sa.ss_family, ==, AF_INET);  /* ZF doesn't support IPv6 */
+  ((struct sockaddr_in*)&my_sa)->sin_port = 11111;
 
   /* Tell client our address, and get their's. */
-  sfnt_sock_put_sockaddr_in(ss, &my_sa);
-  sfnt_sock_get_sockaddr_in(ss, &peer_sa);
+  sfnt_sock_put_sockaddr(ss, &my_sa);
+  sfnt_sock_get_sockaddr(ss, &peer_sa);
 
   to_sa = (struct sockaddr*) &peer_sa;
   to_sa_len = sizeof(peer_sa);
@@ -1649,6 +1700,7 @@ static void zf_tcp_accept(int ss, struct zft** zft_out)
   socklen_t sa_len = sizeof(sa);
 
   NT_TRY(getsockname(ss, (struct sockaddr*) &sa, &sa_len));
+  NT_TESTi3(sa.sin_family, ==, AF_INET);  /* ZF doesn't support IPv6 */
   sa.sin_port = 11111;
 
   struct zftl* listener;
@@ -1670,13 +1722,15 @@ static int zf_tcp_connect(int ss, struct zft_handle* th,
   struct addrinfo* ai;
   int rc;
 
-  if( (rc = sfnt_getaddrinfo(host_or_hostport, NULL, port_i_or_neg, &ai)) != 0 )
+  if( (rc = sfnt_getaddrinfo(AF_INET, host_or_hostport, NULL,
+                             port_i_or_neg, &ai)) != 0 )
     return rc;
 
   /* Use the same local interface as the setup socket */
   struct sockaddr_in sa;
   socklen_t sa_len = sizeof(sa);
   NT_TRY(getsockname(ss, (struct sockaddr*) &sa, &sa_len));
+  NT_TESTi3(sa.sin_family, ==, AF_INET);  /* ZF doesn't support IPv6 */
   sa.sin_port = 11111;
 
   NT_TRY(zft_addr_bind(th, (struct sockaddr*) &sa, sa_len, 0));
@@ -1730,21 +1784,50 @@ static void dpdk_udp_setup_addrs(int ss)
 #endif
 
 
-static void udp_bind_sock(int us, int ss)
+/* If the address portion of 'dst' is zero then copy the value from 'src'.
+ * Used to fix up bound multicast sockets. */
+static void copy_addr_if_zero(const struct sockaddr_storage* src,
+                              struct sockaddr_storage* dst)
 {
-  struct sockaddr_in ss_sa;
-  struct sockaddr_in sa;
+  assert(src->ss_family == dst->ss_family);
+  switch( dst->ss_family ) {
+  case AF_INET: {
+    const struct sockaddr_in* sa = (const struct sockaddr_in*)src;
+    struct sockaddr_in* da = (struct sockaddr_in*)dst;
+    if( da->sin_addr.s_addr == 0 )
+      da->sin_addr = sa->sin_addr;
+    break;
+  }
+  case AF_INET6: {
+    const struct sockaddr_in6* sa = (const struct sockaddr_in6*)src;
+    struct sockaddr_in6* da = (struct sockaddr_in6*)dst;
+    struct in6_addr zero = IN6ADDR_ANY_INIT;
+    if( memcmp(&zero, da->sin6_addr.s6_addr, sizeof(zero) ) == 0 )
+      da->sin6_addr = sa->sin6_addr;
+    break;
+  }
+  }
+}
+
+
+static int udp_create_and_bind_sock(int ss)
+{
+  struct sockaddr_storage ss_sa;
   unsigned char uc;
   socklen_t sa_len;
   int rc, one = 1;
+  int us;
 
-  set_ttl(us, cfg_ttl[0]);
-
-  sa_len = sizeof(sa);
+  sa_len = sizeof(ss_sa);
   NT_TRY(getsockname(ss, (struct sockaddr*) &ss_sa, &sa_len));
+
+  NT_TRY2(us, socket(ss_sa.ss_family, SOCK_DGRAM, IPPROTO_UDP));
+  set_ttl(ss_sa.ss_family, us, cfg_ttl[0]);
 
   if( cfg_bindtodev[0] )
     NT_TRY(sfnt_so_bindtodevice(us, cfg_bindtodev[0]));
+  if( cfg_v6only[0] )
+    NT_TRY(setsockopt(us, IPPROTO_IPV6, IPV6_V6ONLY, &one, sizeof(one)));
 
   if( cfg_bind[0] ) {
     NT_TRY(setsockopt(us, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)));
@@ -1756,48 +1839,69 @@ static void udp_bind_sock(int us, int ss)
     }
   }
   else if( cfg_mcast ) {
-    sa.sin_family = AF_INET;
-    sa.sin_port = 0;
-    sa.sin_addr.s_addr = inet_addr(cfg_mcast);
-    NT_TRY(bind(us, (struct sockaddr*) &sa, sizeof(sa)));
+    if( ss_sa.ss_family == AF_INET6 ) {
+      struct sockaddr_in6 sa;
+      sa.sin6_family = AF_INET6;
+      sa.sin6_port = 0;
+      inet_pton(AF_INET6, cfg_mcast, &sa.sin6_addr.s6_addr);
+      NT_TRY(bind(us, (struct sockaddr*) &sa, sizeof(sa)));
+    }
+    else {
+      struct sockaddr_in sa;
+      sa.sin_family = AF_INET;
+      sa.sin_port = 0;
+      sa.sin_addr.s_addr = inet_addr(cfg_mcast);
+      NT_TRY(bind(us, (struct sockaddr*) &sa, sizeof(sa)));
+    }
   }
   else {
     /* Bind to same local interface as the setup socket. */
+    struct sockaddr_storage sa;
     sa = ss_sa;
-    sa.sin_port = 0;
+    if( sa.ss_family == AF_INET6 )
+      ((struct sockaddr_in6*) &sa)->sin6_port = 0;
+    else
+      ((struct sockaddr_in*) &sa)->sin_port = 0;
     NT_TRY(bind(us, (struct sockaddr*) &sa, sizeof(sa)));
   }
 
   sa_len = sizeof(my_sa);
   NT_TRY(getsockname(us, (struct sockaddr*) &my_sa, &sa_len));
-  if( my_sa.sin_addr.s_addr == 0 )
-    my_sa.sin_addr = ss_sa.sin_addr;
+  copy_addr_if_zero(&ss_sa, &my_sa);
 
   if( cfg_mcast ) {
     if( cfg_mcast_intf[0] )
-      NT_TRY(sfnt_ip_multicast_if(us, cfg_mcast_intf[0]));
-    rc = sfnt_ip_add_membership(us, inet_addr(cfg_mcast), cfg_mcast_intf[0]);
+      NT_TRY_GAI(sfnt_ip_multicast_if(us, my_sa.ss_family, cfg_mcast_intf[0]));
+    rc = sfnt_ip_add_membership(us, my_sa.ss_family, cfg_mcast,
+                                cfg_mcast_intf[0]);
     if( rc != 0 ) {
       sfnt_err("ERROR: failed to join '%s' on interface '%s'\n",
                cfg_mcast, cfg_mcast_intf[0]);
-      sfnt_err("ERROR: rc=%d errno=(%d %s) gai_strerror=(%s)\n",
-               rc, errno, strerror(errno), gai_strerror(rc));
+      sfnt_err("ERROR: rc=%d gai_strerror=(%s) errno=(%d %s)\n",
+               rc, gai_strerror(rc),
+	       rc == EAI_SYSTEM ? errno : 0,
+	       rc == EAI_SYSTEM ? strerror(errno) : "N/A");
       sfnt_fail_setup();
     }
     /* Solaris requires this to be an unsigned char */
     uc = cfg_mcast_loop[0];
     NT_TRY(setsockopt(us, SOL_IP, IP_MULTICAST_LOOP, &uc, sizeof(uc)));
-    my_sa.sin_addr.s_addr = inet_addr(cfg_mcast);
+    if( my_sa.ss_family == AF_INET6 )
+      inet_pton(AF_INET6, cfg_mcast,
+                ((struct sockaddr_in6*) &my_sa)->sin6_addr.s6_addr);
+    else
+      ((struct sockaddr_in*) &my_sa)->sin_addr.s_addr = inet_addr(cfg_mcast);
     sleep(cfg_mcast_sleep);
   }
+  return us;
 }
 
 
 static void udp_exchange_addrs(int us, int ss)
 {
   /* Tell client our address, and get their's. */
-  sfnt_sock_put_sockaddr_in(ss, &my_sa);
-  sfnt_sock_get_sockaddr_in(ss, &peer_sa);
+  sfnt_sock_put_sockaddr(ss, &my_sa);
+  sfnt_sock_get_sockaddr(ss, &peer_sa);
 
   if( cfg_connect[0] ) {
     NT_TRY(connect(us, (struct sockaddr*) &peer_sa, sizeof(peer_sa)));
@@ -1851,20 +1955,74 @@ static int do_server2(int ss);
 
 static int do_server(void)
 {
-  int sl, ss, one = 1;
+  int sl = -1, sl6 = -1, ss, one = 1;
+
+  sfnt_tsc_get_params_begin(&tsc_measure);
 
   /* Open listening socket, and wait for client to connect. */
-  NT_TRY2(sl, socket(PF_INET, SOCK_STREAM, 0));
-  NT_TRY(setsockopt(sl, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)));
-  NT_TRY(sfnt_bind_port(sl, cfg_port));
-  NT_TRY(listen(sl, 1));
+  /* The support for dual-stack v4/v6 sockets is variable (e.g. default value
+   * of IPV6_V6ONLY, whether IPv6 is available at all, availability of Onload
+   * accelaration, etc.), so hand-roll it with both types for broadest
+   * compatibility */
+  if( ! cfg_ipv6 ) {
+    NT_TRY2(sl, socket(PF_INET, SOCK_STREAM, 0));
+    NT_TRY(setsockopt(sl, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)));
+    NT_TRY(sfnt_bind_port(sl, AF_INET, cfg_port));
+    NT_TRY(listen(sl, 1));
+  }
+  if( ! cfg_ipv4 ) {
+    sl6 = socket(PF_INET6, SOCK_STREAM, 0);
+    if( sl6 < 0 ) {
+      sfnt_err("%s: server: IPv6 support is unavailable. "
+               "Using IPv4 only (%d)\n",
+               sfnt_app_name, errno);
+    }
+    else {
+      NT_TRY(setsockopt(sl6, IPPROTO_IPV6, IPV6_V6ONLY, &one, sizeof(one)));
+      NT_TRY(setsockopt(sl6, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)));
+      NT_TRY(sfnt_bind_port(sl6, AF_INET6, cfg_port));
+      NT_TRY(listen(sl6, 1));
+    }
+  }
+  if( sl < 0 && sl6 < 0 ) {
+    sfnt_err("%s: server: cannot specify both --ipv4 and --ipv6\n",
+             sfnt_app_name);
+    exit(3);
+  }
   if( ! sfnt_quiet )
     sfnt_err("%s: server: waiting for client to connect...\n", sfnt_app_name);
-  NT_TRY2(ss, accept(sl, NULL, NULL));
+  if( sl >= 0 && sl6 >= 0 ) {
+    for( ; ; ) {
+      fd_set set;
+      int n;
+      FD_ZERO(&set);
+      FD_SET(sl, &set);
+      FD_SET(sl6, &set);
+      n = select(1 + (sl > sl6 ? sl : sl6), &set, NULL, NULL, NULL);
+      if( n > 0 ) {
+        if( FD_ISSET(sl, &set) ) {
+          NT_TRY2(ss, accept(sl, NULL, NULL));
+          break;
+        }
+        if( FD_ISSET(sl6, &set) ) {
+          NT_TRY2(ss, accept(sl6, NULL, NULL));
+          break;
+        }
+      }
+    }
+  }
+  else if( sl >= 0 ) {
+    NT_TRY2(ss, accept(sl, NULL, NULL));
+  }
+  else if( sl6 >= 0 ) {
+    NT_TRY2(ss, accept(sl6, NULL, NULL));
+  }
   if( ! sfnt_quiet )
     sfnt_err("%s: server: client connected\n", sfnt_app_name);
-  close(sl);
-  sl = -1;
+  if( sl >= 0 )
+    close(sl);
+  if( sl6 >= 0 )
+    close(sl6);
 
   return do_server2(ss);
 }
@@ -1872,7 +2030,7 @@ static int do_server(void)
 
 static int do_server2(int ss)
 {
-  int sl, iter, msg_size;
+  int sl, iter, send_size, recv_size;
   union handle read_handle, write_handle;
 
   server_check_ver(ss);
@@ -1881,19 +2039,28 @@ static int do_server2(int ss)
 
   /* Init after we've received config opts from client. */
   do_init();
+  /* We don't need particularly accurate timing on the server side, so a
+   * millisecond of calibration should be fine - it's only used for
+   * timeouts */
+  NT_TRY(sfnt_tsc_get_params_end(&tsc_measure, &tsc, 1000));
 
   /* Create and bind/connect test socket. */
   switch( handle_type ) {
   case HT_TCP: {
-    struct sockaddr_in sa;
-    socklen_t sa_len = sizeof(sa);
     int one = 1;
-    NT_TRY2(sl, socket(PF_INET, SOCK_STREAM, 0));
+    int port;
+    struct sockaddr_storage sa;
+    socklen_t sal = sizeof(sa);
+    NT_TRY(getsockname(ss, (struct sockaddr*)&sa, &sal));
+    NT_TRY2(sl, socket(sa.ss_family, SOCK_STREAM, 0));
     if( cfg_bindtodev[0] )
       NT_TRY(sfnt_so_bindtodevice(sl, cfg_bindtodev[0]));
+    if( cfg_v6only[0] )
+      NT_TRY(setsockopt(sl, IPPROTO_IPV6, IPV6_V6ONLY,
+                        &one, sizeof(one)));
     NT_TRY(listen(sl, 1));
-    NT_TRY(getsockname(sl, (struct sockaddr*) &sa, &sa_len));
-    sfnt_sock_put_int(ss, ntohs(sa.sin_port));
+    NT_TRY2(port, sfnt_get_port(sl));
+    sfnt_sock_put_int(ss, port);
     NT_TRY2(read_handle.fd, accept(sl, NULL, NULL));
     write_handle.fd = read_handle.fd;
     if( cfg_nodelay[0] )
@@ -1904,8 +2071,7 @@ static int do_server2(int ss)
     break;
   }
   case HT_UDP:
-    NT_TRY2(read_handle.fd, socket(PF_INET, SOCK_DGRAM, 0));
-    udp_bind_sock(read_handle.fd, ss);
+    NT_TRY2(read_handle.fd, udp_create_and_bind_sock(ss));
     udp_exchange_addrs(read_handle.fd, ss);
     write_handle.fd = read_handle.fd;
     break;
@@ -1951,8 +2117,12 @@ static int do_server2(int ss)
   default:
     NT_ASSERT(0);
   }
-  if( handle_type & HTF_SOCKET )
+  if( handle_type & HTF_SOCKET ) {
     set_sock_timeouts(read_handle.fd);
+    if( cfg_busy_poll[0] )
+      NT_TRY(setsockopt(read_handle.fd, SOL_SOCKET, SO_BUSY_POLL,
+                        &cfg_busy_poll[0], sizeof(cfg_busy_poll[0])));
+  }
 
 #ifdef USE_ZF
   if( handle_type & HTF_ZF )
@@ -1971,14 +2141,15 @@ static int do_server2(int ss)
     iter = sfnt_sock_get_int(ss);
     if( iter == 0 )
       break;
-    msg_size = sfnt_sock_get_int(ss);
+    send_size = sfnt_sock_get_int(ss);
+    recv_size = (uint64_t) send_size * cfg_n_pings[1] / cfg_n_pings[0];
 
     if( cfg_tmpl_send[0] != -1 ) {
-      tmpl_update_size = msg_size * cfg_tmpl_send[0] / 100;
-      do_tmpl_alloc(read_handle.fd, ppbuf, msg_size, 0);
+      tmpl_update_size = recv_size * cfg_tmpl_send[0] / 100;
+      do_tmpl_alloc(read_handle.fd, ppbuf, recv_size, 0);
     }
     while( iter-- )
-      do_pong(read_handle, write_handle, msg_size);
+      do_pong(read_handle, write_handle, recv_size, send_size);
     if( cfg_tmpl_send[0] != -1 )
       do_tmpl_abort(write_handle.fd);
   }
@@ -2054,7 +2225,7 @@ static void get_stats(struct stats* s, int* results, int results_n)
 
 static void write_raw_results(int msg_size, int* results, int results_n)
 {
-  char fname[strlen(cfg_raw) + 30];
+  char* fname = (char*) alloca(strlen(cfg_raw) + 30);
   FILE* f;
   int i;
   sprintf(fname, "%s-%d.dat", cfg_raw, msg_size);
@@ -2068,30 +2239,72 @@ static void write_raw_results(int msg_size, int* results, int results_n)
 }
 
 
+static void run_test(int ss, union handle read_handle,
+                     union handle write_handle, int maxms, int minms,
+                     int maxiter, int miniter, int* results_n, int msg_size,
+                     int* results)
+{
+  int n_this_time = miniter;
+  uint64_t start, end, ticks;
+  uint64_t freq = monotonic_clock_freq();
+  uint64_t minticks = minms * freq / 1000;
+  uint64_t maxticks = maxms * freq / 1000;
+
+  start = monotonic_clock();
+
+  do {
+    if( *results_n + n_this_time > maxiter )
+      n_this_time = maxiter - *results_n;
+    if( n_this_time == 0 )
+      break;     /* No point in continuing, even if minms is not yet met */
+
+    do_pings(ss, read_handle, write_handle, msg_size,
+             n_this_time, results + *results_n);
+    *results_n += n_this_time;
+
+    end = monotonic_clock();
+    ticks = end - start;
+  } while( (ticks < maxticks && *results_n < maxiter) ||
+           (ticks < minticks || *results_n < miniter) );
+}
+
+
+static void do_warmup(int ss, union handle read_handle,
+                      union handle write_handle)
+{
+  int results_n = 0;
+  int* results;
+
+  /* If the requested warmup timeout is large with respect to the number of
+   * warmup iterations, the warmup would sit doing nothing after the requested
+   * number of iterations elapsed, which is unhelpful.  Ideally we would like
+   * to allow an unbounded number of iterations up to the timeout, but we have
+   * to provide some storage for each iteration, so we synthesise a bound. */
+  const int MIN_RESOLUTION_NS = 50;
+  int maxiter = cfg_warmupms * (1000000 / MIN_RESOLUTION_NS);
+  if( cfg_warmupiter > maxiter )
+    maxiter = cfg_warmupiter;
+
+  results = malloc(maxiter * sizeof(*results));
+  NT_TEST(results != NULL);
+
+  /* Run for at least cfg_warmupms milliseconds and at least cfg_warmupiter
+   * iterations. */
+  run_test(ss, read_handle, write_handle, cfg_warmupms, cfg_warmupms, maxiter,
+           cfg_warmupiter, &results_n, 1, results);
+
+  free(results);
+}
+
+
 static void do_test(int ss, union handle read_handle, union handle write_handle,
                     int msg_size, int* results)
 {
-  int n_this_time = cfg_miniter;
-  struct timeval start, end;
-  int ms, results_n = 0;
+  int results_n = 0;
   struct stats s;
 
-  gettimeofday(&start, NULL);
-
-  do {
-    if( results_n + n_this_time > cfg_maxiter )
-      n_this_time = cfg_maxiter - results_n;
-
-    /* n_this_time can be 0 if minms not yet met */
-    do_pings(ss, read_handle, write_handle, msg_size,
-             n_this_time, results + results_n);
-    results_n += n_this_time;
-
-    gettimeofday(&end, NULL);
-    ms = (end.tv_sec - start.tv_sec) * 1000;
-    ms += (end.tv_usec - start.tv_usec) / 1000;
-  } while( (ms < cfg_maxms && results_n < cfg_maxiter) ||
-           (ms < cfg_minms || results_n < cfg_miniter) );
+  run_test(ss, read_handle, write_handle, cfg_maxms, cfg_minms, cfg_maxiter,
+           cfg_miniter, &results_n, msg_size, results);
 
   if( cfg_raw != NULL )
     write_raw_results(msg_size, results, results_n);
@@ -2134,15 +2347,17 @@ static int try_connect(const char* hostport, int default_port)
   int max_attempts = 100;
   int ss, rc, n_attempts = 0;
   int one = 1;
-
-  if( strchr(hostport, ':') != NULL )
-    default_port = -1;
+  struct addrinfo* ai;
+  int err;
 
   while( 1 ) {
-    NT_TRY2(ss, socket(PF_INET, SOCK_STREAM, 0));
+    NT_TRY_GAI(sfnt_getendpointinfo(AF_UNSPEC, hostport, default_port, &ai));
+    NT_TRY2(ss, socket(ai->ai_family, SOCK_STREAM, 0));
     NT_TRY(setsockopt(ss, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
-    rc = sfnt_connect(ss, hostport, NULL, default_port);
-    if( rc == 0 || ++n_attempts == max_attempts || errno != ECONNREFUSED )
+    rc = connect(ss, ai->ai_addr, ai->ai_addrlen);
+    err = errno;
+    freeaddrinfo(ai);
+    if( rc == 0 || ++n_attempts == max_attempts || err != ECONNREFUSED )
       return rc ? rc : ss;
     /* Something goes bad on Solaris if we try to reconnect with the same
      * socket, so create a new one each time.
@@ -2208,6 +2423,8 @@ static int do_client(int argc, char* argv[])
 {
   const char* hostport;
   pid_t pid;
+
+  sfnt_tsc_get_params_begin(&tsc_measure);
 
   if( argc < 1 || argc > 2 )
     sfnt_fail_usage("wrong number of arguments");
@@ -2280,7 +2497,7 @@ static int do_client(int argc, char* argv[])
         sfnt_quiet = 1;
         return do_server();
       }
-      hostport = "localhost";
+      hostport = cfg_ipv6 ? "::1" : "127.0.0.1";
       local = 1;
     }
     NT_TRY2(ss, try_connect(hostport, cfg_port));
@@ -2313,8 +2530,13 @@ static int do_client2(int ss, const char* hostport, int local)
        */
       cfg_affinity[1] = "2";
   }
-  if( cfg_mcast_intf[0] != NULL && cfg_mcast == NULL )
-    cfg_mcast = "224.1.2.48";
+  if( cfg_mcast_intf[0] != NULL && cfg_mcast == NULL ) {
+    struct sockaddr_storage sa;
+    socklen_t sal = sizeof(sa);
+    NT_TRY(getsockname(ss, (struct sockaddr*) &sa, &sal));
+    cfg_mcast = sa.ss_family == AF_INET6 ? "ff05::142"
+                                         : "224.1.2.48";
+  }
 
   do_init();
 
@@ -2331,22 +2553,19 @@ static int do_client2(int ss, const char* hostport, int local)
   /* Create and bind/connect test socket. */
   switch( handle_type ) {
   case HT_TCP: {
-    char host[strlen(hostport) + 1];
-    char* p;
-    strcpy(host, hostport);
-    if( (p = strchr(host, ':')) != NULL )
-      *p = '\0';
+    struct addrinfo* ai;
     int port = sfnt_sock_get_int(ss);
-    NT_TRY2(read_h.fd, socket(PF_INET, SOCK_STREAM, 0));
+    NT_TRY_GAI(sfnt_getaddrinfo(AF_UNSPEC, hostport, NULL, port, &ai));
+    NT_TRY2(read_h.fd, socket(ai->ai_family, SOCK_STREAM, 0));
     if( cfg_nodelay[0] )
       NT_TRY(setsockopt(read_h.fd, SOL_TCP, TCP_NODELAY, &one, sizeof(one)));
-    NT_TRY(sfnt_connect(read_h.fd, host, NULL, port));
+    NT_TRY(connect(read_h.fd, ai->ai_addr, ai->ai_addrlen));
+    freeaddrinfo(ai);
     write_h.fd = read_h.fd;
     break;
   }
   case HT_UDP:
-    NT_TRY2(read_h.fd, socket(PF_INET, SOCK_DGRAM, 0));
-    udp_bind_sock(read_h.fd, ss);
+    NT_TRY2(read_h.fd, udp_create_and_bind_sock(ss));
     udp_exchange_addrs(read_h.fd, ss);
     write_h.fd = read_h.fd;
     break;
@@ -2402,8 +2621,12 @@ static int do_client2(int ss, const char* hostport, int local)
   default:
     NT_ASSERT(0);
   }
-  if( handle_type & HTF_SOCKET )
+  if( handle_type & HTF_SOCKET ) {
     set_sock_timeouts(read_h.fd);
+    if( cfg_busy_poll[0] )
+      NT_TRY(setsockopt(read_h.fd, SOL_SOCKET, SO_BUSY_POLL, &cfg_busy_poll[0],
+                        sizeof(cfg_busy_poll[0])));
+  }
 
 #ifdef USE_ZF
   /* For zf we can't mux between normal fds and zockets */
@@ -2415,6 +2638,10 @@ static int do_client2(int ss, const char* hostport, int local)
 
   results = malloc(cfg_maxiter * sizeof(*results));
   NT_TEST(results != NULL);
+
+  /* Very rough calibration so we've got enough data for the warmup and sys
+   * info. We re-sample more accurately again after that */
+  NT_TRY(sfnt_tsc_get_params_end(&tsc_measure, &tsc, 100));
   sfnt_dump_sys_info(&tsc);
   if( server_ld_preload != NULL )
     printf("# server LD_PRELOAD=%s\n", server_ld_preload);
@@ -2454,11 +2681,15 @@ static int do_client2(int ss, const char* hostport, int local)
   /* Client side ready - will start after signal from server */
   i = sfnt_sock_get_int(ss);
 
+  do_warmup(ss, read_h, write_h);
+  NT_TRY(sfnt_tsc_get_params_end(&tsc_measure, &tsc, 50000));
   for( i = 0; i < msg_sizes.len; ++i )
     do_test(ss, read_h, write_h, msg_sizes.list[i], results);
 
   /* Tell server side to exit. */
   sfnt_sock_put_int(ss, 0);
+
+  free(results);
 
   return 0;
 }
@@ -2469,11 +2700,18 @@ int main(int argc, char* argv[])
   pid_t pid = 0;
   int rc = 0;
 
+#ifdef _WIN32
+  WSADATA WinsockInfo;
+  NT_TRY3(rc, 0, WSAStartup(MAKEWORD(2, 2), &WinsockInfo));
+#endif
+
   sfnt_app_getopt("[tcp|udp|pipe|unix_stream|unix_datagram|zf_udp|zf_tcp|"
                   "dpdk_udp [host[:port]]]",
                 &argc, argv, cfg_opts, N_CFG_OPTS);
   --argc; ++argv;
 
+  if( cfg_msg_more[0] && MSG_MORE == 0 )
+    sfnt_fail_usage("ERROR: MSG_MORE not supported on this platform");
   if( cfg_miniter > cfg_maxiter )
     cfg_maxiter = cfg_miniter;
   if( cfg_minms > cfg_maxms )
