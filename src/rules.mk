@@ -1,3 +1,4 @@
+# (C) Copyright 2011-2019 Xilinx, Inc.
 
 CFLAGS		+= -Wall -Werror -g
 

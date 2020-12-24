@@ -1,3 +1,5 @@
+# (C) Copyright 2011-2019 Xilinx, Inc.
+
 include rules_pre.mk
 
 
