@@ -16,6 +16,14 @@
 
 #ifdef USE_ZF
 #include <zf/zf.h>
+/* On versions of ZF where overlapped is not supported define relevant flags
+ * as 0, which is equivalent to not using them.
+ */
+#ifndef ZF_EPOLLIN_OVERLAPPED
+ #define ZF_EPOLLIN_OVERLAPPED 0
+ #define ZF_OVERLAPPED_WAIT 0
+ #define ZF_OVERLAPPED_COMPLETE 0
+#endif
 #endif
 
 #ifdef USE_DPDK
