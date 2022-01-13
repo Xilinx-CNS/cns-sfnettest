@@ -88,12 +88,18 @@ CPPFLAGS	+= -DUSE_ZF
 endif
 
 ifdef ONLOAD_TREE
+ifdef TCPDIRECT_TREE
+INC_TCPDIRECT = -I$(TCPDIRECT_TREE)/src/include
+else
+TCPDIRECT_TREE = $(ONLOAD_TREE)
+endif
+
 LINK_ONLOAD_EXT	:= \
 	-L$(ONLOAD_TREE)/build/$(shell mmaketool --userbuild)/lib/onload_ext \
 	-Wl,-rpath,$(ONLOAD_TREE)/build/$(shell mmaketool --userbuild)/lib/onload_ext
 LINK_ONLOAD_ZF	:= \
-	-L$(ONLOAD_TREE)/build/$(shell mmaketool --userbuild)/lib/zf \
-	-Wl,-rpath,$(ONLOAD_TREE)/build/$(shell mmaketool --userbuild)/lib/zf
+	-L$(TCPDIRECT_TREE)/build/$(shell mmaketool --userbuild)/lib/zf \
+	-Wl,-rpath,$(TCPDIRECT_TREE)/build/$(shell mmaketool --userbuild)/lib/zf
 
 ifdef USE_DPDK
 ifeq ($(RTE_SDK),)
@@ -132,9 +138,9 @@ LINK_DPDK = \
   -lnuma
 endif
 
-sfnt-pingpong.o: CPPFLAGS += -I$(ONLOAD_TREE)/src/include $(DPDK_CFLAGS)
-sfnt-stream.o:   CPPFLAGS += -I$(ONLOAD_TREE)/src/include
-sfnt_mux.o:      CPPFLAGS += -I$(ONLOAD_TREE)/src/include
+sfnt-pingpong.o: CPPFLAGS += -I$(ONLOAD_TREE)/src/include $(INC_TCPDIRECT) $(DPDK_CFLAGS)
+sfnt-stream.o:   CPPFLAGS += -I$(ONLOAD_TREE)/src/include $(INC_TCPDIRECT)
+sfnt_mux.o:      CPPFLAGS += -I$(ONLOAD_TREE)/src/include $(INC_TCPDIRECT)
 sfnt-pingpong: LIBS := $(LINK_ONLOAD_EXT) $(LINK_ONLOAD_ZF) $(LIBS) $(LINK_DPDK)
 sfnt-stream:   LIBS := $(LINK_ONLOAD_EXT) $(LINK_ONLOAD_ZF) $(LIBS)
 endif
