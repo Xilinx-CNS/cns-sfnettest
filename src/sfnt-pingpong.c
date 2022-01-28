@@ -408,6 +408,7 @@ static ssize_t rfn_zft_recv(union handle h, void* buf, size_t len, int flags)
   int got = 0, all = flags & MSG_WAITALL;
   int ovl = flags & ZF_OVERLAPPED_WAIT;
   int i;
+  int repeat;
 
   do {
     if( !zf_mux )
@@ -418,7 +419,7 @@ static ssize_t rfn_zft_recv(union handle h, void* buf, size_t len, int flags)
      * make 2 calls to zft_zc_recv as if we have data queued over the point at
      * which the ring wraps it will be split into batches.
      */
-    for( int repeat = 0; repeat < 2; ++ repeat ) {
+    for( repeat = 0; repeat < 2; ++ repeat ) {
       struct {
         struct zft_msg zcr;
         struct iovec iov[6];
