@@ -1051,7 +1051,7 @@ static int do_server2(int ss)
 
 
 static void do_pings(int ss, int read_fd, int write_fd, int msg_size,
-                     int iter, int* results)
+                     int iter, int64_t* results)
 {
   uint64_t start, stop;
   int i;
@@ -1080,9 +1080,9 @@ static void do_pings(int ss, int read_fd, int write_fd, int msg_size,
 }
 
 
-static void get_stats(struct stats* s, int* results, int results_n)
+static void get_stats(struct stats* s, int64_t* results, int results_n)
 {
-  int* results_end = results + results_n;
+  int64_t* results_end = results + results_n;
   int64_t variance;
 
   qsort(results, results_n, sizeof(int), &sfnt_qsort_compare_int);
@@ -1095,7 +1095,7 @@ static void get_stats(struct stats* s, int* results, int results_n)
 }
 
 
-static void write_raw_results(int msg_size, int* results, int results_n)
+static void write_raw_results(int msg_size, int64_t* results, int results_n)
 {
   char* fname = (char*) alloca(strlen(cfg_raw) + 30);
   FILE* f;
@@ -1105,15 +1105,15 @@ static void write_raw_results(int msg_size, int* results, int results_n)
     sfnt_err("ERROR: Could not open output file '%s'\n", fname);
     sfnt_fail_test();
   }
-  for( i = 0; i < results_n; ++i )
-    fprintf(f, "%d\n", results[i]);
+  for( i = 0; i < results_n; ++i)
+    fprintf(f, "%"PRId64"\n", results[i]);
   fclose(f);
 }
 
 
 static void run_test(int ss, int read_fd, int write_fd, int maxms, int minms,
                      int maxiter, int miniter, int* results_n, int msg_size,
-                     int* results)
+                     int64_t* results)
 {
   int n_this_time = miniter;
   uint64_t start, end, ticks;
@@ -1143,7 +1143,7 @@ static void run_test(int ss, int read_fd, int write_fd, int maxms, int minms,
 static void do_warmup(int ss, int read_fd, int write_fd)
 {
   int results_n = 0;
-  int* results;
+  int64_t* results;
 
   /* If the requested warmup timeout is large with respect to the number of
    * warmup iterations, the warmup would sit doing nothing after the requested
@@ -1168,7 +1168,7 @@ static void do_warmup(int ss, int read_fd, int write_fd)
 
 
 static void do_test(int ss, int read_fd, int write_fd,
-                    int msg_size, int* results)
+                    int msg_size, int64_t* results)
 {
   int results_n = 0;
   struct stats s;
@@ -1324,7 +1324,7 @@ static int do_client2(int ss, const char* hostport, int local)
   int read_fd, write_fd;
   char* server_ld_preload;
   int msg_size;
-  int* results;
+  int64_t* results;
   int i, one = 1;
   uint64_t old_tsc_hz;
 
