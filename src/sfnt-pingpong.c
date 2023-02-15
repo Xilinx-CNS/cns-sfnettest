@@ -1069,7 +1069,8 @@ static void do_pings(int ss, int read_fd, int write_fd, int msg_size,
     sfnt_tsc(&start);
     do_ping(read_fd, write_fd, msg_size);
     sfnt_tsc(&stop);
-    results[i] = (int) sfnt_tsc_nsec(&tsc, stop - start - tsc.tsc_cost);
+    
+    results[i] = sfnt_tsc_nsec(&tsc, stop - start - tsc.tsc_cost);
     if( ! cfg_rtt )
       results[i] /= 2;
     if( cfg_sleep_gap )
