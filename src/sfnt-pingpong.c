@@ -121,12 +121,12 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
 
 
 struct stats {
-  int mean;
-  int min;
-  int median;
-  int max;
-  int percentile;
-  int stddev;
+  int64_t mean;
+  int64_t min;
+  int64_t median;
+  int64_t max;
+  int64_t percentile;
+  int64_t stddev;
 };
 
 
@@ -1085,13 +1085,13 @@ static void get_stats(struct stats* s, int64_t* results, int results_n)
   int64_t* results_end = results + results_n;
   int64_t variance;
 
-  qsort(results, results_n, sizeof(int), &sfnt_qsort_compare_int);
-  sfnt_iarray_mean_and_limits(results, results_end, &s->mean, &s->min, &s->max);
+  qsort(results, results_n, sizeof(int64_t), &sfnt_qsort_compare_int64);
+  sfnt_iarray_mean_and_limits_int64(results, results_end, &s->mean, &s->min, &s->max);
 
   s->median = results[results_n >> 1u];
-  s->percentile = results[(int) (results_n * cfg_percentile / 100)];
-  sfnt_iarray_variance(results, results_end, s->mean, &variance);
-  s->stddev = (int) sqrt((double) variance);
+  s->percentile = results[(int64_t) (results_n * cfg_percentile / 100)];
+  sfnt_iarray_variance_int64(results, results_end, s->mean, &variance);
+  s->stddev = (int64_t) sqrt((double) variance);
 }
 
 
