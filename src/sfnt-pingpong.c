@@ -1180,8 +1180,8 @@ static void do_test(int ss, int read_fd, int write_fd,
   if( cfg_raw != NULL )
     write_raw_results(msg_size, results, results_n);
   get_stats(&s, results, results_n);
-  printf("\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", msg_size,
-         s.mean, s.min, s.median, s.max, s.percentile, s.stddev, results_n);
+  printf("\t%d\t%"PRId64"\t%"PRId64"\t%"PRId64"\t%"PRId64"\t%"PRId64"\t%"PRId64"\t%d\n",
+            msg_size, s.mean, s.min, s.median, s.max, s.percentile, s.stddev, results_n);
   fflush(stdout);
 }
 
@@ -1409,7 +1409,8 @@ static int do_client2(int ss, const char* hostport, int local)
     printf("# server LD_PRELOAD=%s\n", server_ld_preload);
   printf("# percentile=%g\n", (double) cfg_percentile);
   printf("#\n");
-  printf("#\tsize\tmean\tmin\tmedian\tmax\t%%ile\tstddev\titer\n");
+  printf("#\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+              "size", "mean", "min", "median", "max", "%ile", "stddev", "iter");
   fflush(stdout);
 
   if( fd_type & FDTF_STREAM ) {
