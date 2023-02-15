@@ -298,6 +298,13 @@ extern void sfnt_iarray_mean_and_limits(const int* start, const int* end,
 extern void sfnt_iarray_variance(const int* start, const int* end,
                                int mean, int64_t* variance_out);
 
+extern int sfnt_qsort_compare_int64(const void* pa, const void* pb);
+
+extern void sfnt_iarray_mean_and_limits_int64(const int64_t* start, const int64_t* end,
+                               int64_t* mean_out, int64_t* min_out, int64_t* max_out);
+
+extern void sfnt_iarray_variance_int64(const int64_t* start, const int64_t* end,
+                        int64_t mean, int64_t* variance_out);
 
 /**********************************************************************
  * File / muxer convenience functions.
