@@ -176,12 +176,12 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
 
 
 struct stats {
-  int mean;
-  int min;
-  int median;
-  int max;
-  int percentile;
-  int stddev;
+  int64_t mean;
+  int64_t min;
+  int64_t median;
+  int64_t max;
+  int64_t percentile;
+  int64_t stddev;
 };
 
 
@@ -2229,7 +2229,7 @@ static int do_server2(int ss)
 
 
 static void do_pings(int ss, union handle read_h, union handle write_h,
-                     int msg_size, int iter, int* results)
+                     int msg_size, int iter, int64_t* results)
 {
   uint64_t start, stop;
   unsigned time_cnt = 0;
@@ -2253,7 +2253,8 @@ static void do_pings(int ss, union handle read_h, union handle write_h,
     sfnt_tsc(&start);
     do_ping(read_h, write_h, msg_size);
     sfnt_tsc(&stop);
-    results[i] = (int) sfnt_tsc_nsec(&tsc, stop - start - tsc.tsc_cost);
+    
+    results[i] = sfnt_tsc_nsec(&tsc, stop - start - tsc.tsc_cost);
     if( ! cfg_rtt )
       results[i] /= 2;
     if( cfg_sleep_gap )
@@ -2276,22 +2277,22 @@ static void do_pings(int ss, union handle read_h, union handle write_h,
 }
 
 
-static void get_stats(struct stats* s, int* results, int results_n)
+static void get_stats(struct stats* s, int64_t* results, int results_n)
 {
-  int* results_end = results + results_n;
+  int64_t* results_end = results + results_n;
   int64_t variance;
 
-  qsort(results, results_n, sizeof(int), &sfnt_qsort_compare_int);
-  sfnt_iarray_mean_and_limits(results, results_end, &s->mean, &s->min, &s->max);
+  qsort(results, results_n, sizeof(int64_t), &sfnt_qsort_compare_int64);
+  sfnt_iarray_mean_and_limits_int64(results, results_end, &s->mean, &s->min, &s->max);
 
   s->median = results[results_n >> 1u];
-  s->percentile = results[(int) (results_n * cfg_percentile / 100)];
-  sfnt_iarray_variance(results, results_end, s->mean, &variance);
-  s->stddev = (int) sqrt((double) variance);
+  s->percentile = results[(int64_t) (results_n * cfg_percentile / 100)];
+  sfnt_iarray_variance_int64(results, results_end, s->mean, &variance);
+  s->stddev = (int64_t) sqrt((double) variance);
 }
 
 
-static void write_raw_results(int msg_size, int* results, int results_n)
+static void write_raw_results(int msg_size, int64_t* results, int results_n)
 {
   char* fname = (char*) alloca(strlen(cfg_raw) + 30);
   FILE* f;
@@ -2301,8 +2302,8 @@ static void write_raw_results(int msg_size, int* results, int results_n)
     sfnt_err("ERROR: Could not open output file '%s'\n", fname);
     sfnt_fail_test();
   }
-  for( i = 0; i < results_n; ++i )
-    fprintf(f, "%d\n", results[i]);
+  for( i = 0; i < results_n; ++i)
+    fprintf(f, "%"PRId64"\n", results[i]);
   fclose(f);
 }
 
@@ -2310,7 +2311,7 @@ static void write_raw_results(int msg_size, int* results, int results_n)
 static void run_test(int ss, union handle read_handle,
                      union handle write_handle, int maxms, int minms,
                      int maxiter, int miniter, int* results_n, int msg_size,
-                     int* results)
+                     int64_t* results)
 {
   int n_this_time = miniter;
   uint64_t start, end, ticks;
@@ -2341,7 +2342,7 @@ static void do_warmup(int ss, union handle read_handle,
                       union handle write_handle)
 {
   int results_n = 0;
-  int* results;
+  int64_t* results;
 
   /* If the requested warmup timeout is large with respect to the number of
    * warmup iterations, the warmup would sit doing nothing after the requested
@@ -2366,7 +2367,7 @@ static void do_warmup(int ss, union handle read_handle,
 
 
 static void do_test(int ss, union handle read_handle, union handle write_handle,
-                    int msg_size, int* results)
+                    int msg_size, int64_t* results)
 {
   int results_n = 0;
   struct stats s;
@@ -2377,8 +2378,8 @@ static void do_test(int ss, union handle read_handle, union handle write_handle,
   if( cfg_raw != NULL )
     write_raw_results(msg_size, results, results_n);
   get_stats(&s, results, results_n);
-  printf("\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", msg_size,
-         s.mean, s.min, s.median, s.max, s.percentile, s.stddev, results_n);
+  printf("\t%d\t%"PRId64"\t%"PRId64"\t%"PRId64"\t%"PRId64"\t%"PRId64"\t%"PRId64"\t%d\n",
+            msg_size, s.mean, s.min, s.median, s.max, s.percentile, s.stddev, results_n);
   fflush(stdout);
 }
 
@@ -2580,8 +2581,9 @@ static int do_client2(int ss, const char* hostport, int local)
   union handle read_h, write_h;
   char* server_ld_preload;
   int msg_size;
-  int* results;
+  int64_t* results;
   int i, one = 1;
+  uint64_t old_tsc_hz;
 
   client_check_ver(ss);
 
@@ -2715,7 +2717,8 @@ static int do_client2(int ss, const char* hostport, int local)
     printf("# server LD_PRELOAD=%s\n", server_ld_preload);
   printf("# percentile=%g\n", (double) cfg_percentile);
   printf("#\n");
-  printf("#\tsize\tmean\tmin\tmedian\tmax\t%%ile\tstddev\titer\n");
+  printf("#\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+              "size", "mean", "min", "median", "max", "%ile", "stddev", "iter");
   fflush(stdout);
 
   do_zc_init(write_h.fd);
@@ -2751,6 +2754,8 @@ static int do_client2(int ss, const char* hostport, int local)
 
   do_warmup(ss, read_h, write_h);
   NT_TRY(sfnt_tsc_get_params_end(&tsc_measure, &tsc, 50000));
+  if( fabs((double)(int64_t)(tsc.hz - old_tsc_hz) / old_tsc_hz) > .01 )
+    printf("# WARNING: tsc_hz changed to %"PRIu64" on recheck\n", tsc.hz);
   for( i = 0; i < msg_sizes.len; ++i )
     do_test(ss, read_h, write_h, msg_sizes.list[i], results);
 
