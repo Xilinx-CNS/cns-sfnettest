@@ -2753,6 +2753,7 @@ static int do_client2(int ss, const char* hostport, int local)
   i = sfnt_sock_get_int(ss);
 
   do_warmup(ss, read_h, write_h);
+  old_tsc_hz = tsc.hz;
   NT_TRY(sfnt_tsc_get_params_end(&tsc_measure, &tsc, 50000));
   if( fabs((double)(int64_t)(tsc.hz - old_tsc_hz) / old_tsc_hz) > .01 )
     printf("# WARNING: tsc_hz changed to %"PRIu64" on recheck\n", tsc.hz);
