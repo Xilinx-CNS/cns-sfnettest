@@ -304,7 +304,7 @@ extern void sfnt_iarray_mean_and_limits_int64(const int64_t* start, const int64_
                                int64_t* mean_out, int64_t* min_out, int64_t* max_out);
 
 extern void sfnt_iarray_variance_int64(const int64_t* start, const int64_t* end,
-                        int64_t mean, int64_t* variance_out);
+                        int64_t mean, double* variance_out);
 
 /**********************************************************************
  * File / muxer convenience functions.
