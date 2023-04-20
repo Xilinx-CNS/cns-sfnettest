@@ -109,9 +109,10 @@ void sfnt_iarray_mean_and_limits_int64(const int64_t* start, const int64_t* end,
 }
 
 void sfnt_iarray_variance_int64(const int64_t* start, const int64_t* end,
-                        int64_t mean, int64_t* variance_out)
+                        int64_t mean, double* variance_out)
 {
-  int64_t sumsq, diff;
+  double sumsq;
+  int64_t diff;
   const int64_t* i;
 
   NT_ASSERT(end - start > 0);

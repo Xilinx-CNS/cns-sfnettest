@@ -181,7 +181,7 @@ struct stats {
   int64_t median;
   int64_t max;
   int64_t percentile;
-  int64_t stddev;
+  uint64_t stddev;
 };
 
 
@@ -2280,7 +2280,7 @@ static void do_pings(int ss, union handle read_h, union handle write_h,
 static void get_stats(struct stats* s, int64_t* results, int results_n)
 {
   int64_t* results_end = results + results_n;
-  int64_t variance;
+  double variance;
 
   qsort(results, results_n, sizeof(int64_t), &sfnt_qsort_compare_int64);
   sfnt_iarray_mean_and_limits_int64(results, results_end, &s->mean, &s->min, &s->max);
@@ -2288,7 +2288,7 @@ static void get_stats(struct stats* s, int64_t* results, int results_n)
   s->median = results[results_n >> 1u];
   s->percentile = results[(int64_t) (results_n * cfg_percentile / 100)];
   sfnt_iarray_variance_int64(results, results_end, s->mean, &variance);
-  s->stddev = (int64_t) sqrt((double) variance);
+  s->stddev = (uint64_t) sqrt(variance);
 }
 
 
