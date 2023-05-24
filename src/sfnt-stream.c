@@ -47,7 +47,7 @@ static const char* cfg_tcpc_serv;
 static const char* cfg_affinity[2];
 static int         cfg_nodelay;
 static unsigned    cfg_busy_poll[2];
-static unsigned    cfg_rtt_iter = 10000;
+static unsigned    cfg_rtt_iter = 100000;
 static int         cfg_debug;
 static unsigned    cfg_v6only[2];
 static int         cfg_ipv4;
