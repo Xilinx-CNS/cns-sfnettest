@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-FileCopyrightText: Copyright (c) 2012 Solarflare Communications Inc.
 
 sfnettest-1.5.0
 ---------------
@@ -18,5 +20,3 @@ sfnettest-1.5.0
 - Added option --ttl to set IP_TTL and IP_MULTICAST_TTL.
 - Fix minor problem handling command line args.
 - Improve error message when process affinity support is not available.
-
-(C) Copyright 2011-2019 Xilinx, Inc.

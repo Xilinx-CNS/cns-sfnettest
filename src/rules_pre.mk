@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-FileCopyrightText: Copyright (c) 2011 Solarflare Communications Inc.
+
 # Set per OS flags
 ifeq ($(shell uname -s),Linux)
 OS_LINUX := 1
