@@ -51,7 +51,7 @@ static const char* cfg_tcpc_serv;
 static const char* cfg_affinity[2];
 static int         cfg_nodelay;
 static unsigned    cfg_busy_poll[2];
-static unsigned    cfg_rtt_iter = 10000;
+static unsigned    cfg_rtt_iter = 100000;
 static int         cfg_debug;
 static int         cfg_zc[2];
 static int         cfg_kdata_inline[2];
