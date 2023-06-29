@@ -1,6 +1,22 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # SPDX-FileCopyrightText: Copyright (c) 2012-2023 Advanced Micro Devices, Inc.
 
+sfnettest-extension-1.6.0
+-------------------------
+
+The sfnettest 'extension' edition links with the Onload extensions library
+and can optionally link against TCP Direct or DPDK.
+
+- Add --zc option to use the Onload zero copy extension
+- Add --warm option use the ONLOAD_MSG_WARM flag
+- Add --template option to use Onload templated sends
+- Add --muxer option value 'zf' to support TCP Direct muxer
+- Add zf_udp and zf_tcp socket types to support TCP Direct zockets
+- Add dpdk_udp socket type and --[server-]dpdk-args options to support DPDK
+- Add --server-type option to support asymmetric acceleration technology
+- Add --ovl and --ovl-wait options to support TCP Direct overlapped receive
+- Add --compute option to simulate work during TCP Direct receive
+
 sfnettest-1.6.0
 ---------------
 
