@@ -26,6 +26,16 @@ Instructions on running each tool:
 * [`sfnt-pingpong`](README.sfnt-pingpong.md)
 * [`sfnt-stream`](README.sfnt-stream.md)
 
+Container
+---------
+
+[Dockerfile](Dockerfile) includes both tools.
+
+```sh
+docker build --network=host -t sfnettest .
+docker run --network=host sfnettest --help # sfnt-pingpong is default entrypoint
+```
+
 Copyright
 ---------
 
