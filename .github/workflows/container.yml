@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# (c) Copyright 2023 Advanced Micro Devices, Inc.
+name: "Container Image"
+
+on:
+  workflow_dispatch:
+    inputs:
+      registry-prefix:
+        description: Registry host and org
+        type: string
+      version:
+        description: Version of sfnettest
+        type: string
+      release-tag:
+        description: Release tag (no -dev suffix)
+        type: boolean
+        default: false
+      builder-ubi-image:
+        description: Base image for builder (override workflow)
+        type: string
+      ubi-image:
+        description: Base image (override workflow)
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+jobs:
+  container-build:
+    name: Container Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      REGISTRY_PREFIX: ${{ inputs.registry-prefix }}
+      SFNT_VERSION: ${{ inputs.version }}
+      IMAGE_TAG_SUFFIX: ${{ inputs.release-tag == false && '-dev' || '' }}
+      BUILDER_UBI_IMAGE: ${{ inputs.builder-ubi-image || 'registry.access.redhat.com/ubi9-minimal:9.3' }}
+      UBI_IMAGE: ${{ inputs.ubi-image || 'registry.access.redhat.com/ubi9-micro:9.3' }}
+    steps:
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Metadata - version
+      id: meta-version
+      uses: docker/metadata-action@v5
+      with:
+        images: sfnettest
+        tags: |
+          type=match,pattern=sfnettest-([\d\.-]+),group=1
+          type=sha,prefix=git-,format=short
+
+    - name: Metadata - env
+      run: |
+        repo="${GITHUB_REPOSITORY@L}"
+        echo "REGISTRY_PREFIX=${REGISTRY_PREFIX:-ghcr.io/$repo}" >> "$GITHUB_ENV"
+        echo "SFNT_VERSION=${SFNT_VERSION:-$REPO_VERSION}" >> "$GITHUB_ENV"
+      env:
+        REPO_VERSION: ${{ fromJSON(steps.meta-version.outputs.json).labels['org.opencontainers.image.version'] }}
+
+    - name: Metadata - Docker tagging
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: |
+          ${{ env.REGISTRY_PREFIX }}/sfnettest
+        tags: |
+          type=ref,event=branch,suffix=${{ env.IMAGE_TAG_SUFFIX }}
+          type=ref,event=tag,suffix=${{ env.IMAGE_TAG_SUFFIX }}
+          type=ref,event=pr,prefix=pr-
+          type=sha,prefix=git-,format=short
+          type=match,pattern=sfnettest-([\d\.-]+),group=1,suffix=${{ env.IMAGE_TAG_SUFFIX }}
+
+    - if: ${{ contains(env.REGISTRY_PREFIX, 'ghcr.io') }}
+      name: Login to registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+
+    - name: Build
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: Dockerfile
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        push: true
+        build-args: |
+          SFNT_VERSION=${{ env.SFNT_VERSION }}
+          BUILDER_UBI_IMAGE=${{ env.BUILDER_UBI_IMAGE }}
+          UBI_IMAGE=${{ env.UBI_IMAGE }}
