@@ -52,7 +52,7 @@ jobs:
 
     - name: Metadata - env
       run: |
-        repo="${GITHUB_REPOSITORY@L}"
+        repo="${GITHUB_REPOSITORY_OWNER@L}"
         echo "REGISTRY_PREFIX=${REGISTRY_PREFIX:-ghcr.io/$repo}" >> "$GITHUB_ENV"
         echo "SFNT_VERSION=${SFNT_VERSION:-$REPO_VERSION}" >> "$GITHUB_ENV"
       env:
