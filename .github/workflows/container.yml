@@ -48,7 +48,7 @@ jobs:
         images: sfnettest
         tags: |
           type=match,pattern=sfnettest-([\d\.-]+),group=1
-          type=sha,prefix=git-,format=short
+          type=sha,format=short
 
     - name: Metadata - env
       run: |
@@ -92,3 +92,4 @@ jobs:
           SFNT_VERSION=${{ env.SFNT_VERSION }}
           BUILDER_UBI_IMAGE=${{ env.BUILDER_UBI_IMAGE }}
           UBI_IMAGE=${{ env.UBI_IMAGE }}
+          SFNT_BUILD_PARAMS=RELEASE_VERSION_MK=true

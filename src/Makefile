@@ -57,22 +57,19 @@ endif
 sfnt-stream: LIBS += -lpthread
 $(APPS): libsfnettest.a
 
-
 # TODO: Make this stuff VPATH friendly.
 SFNT_SRC_CSUM	:= $(shell find . -name '*.[ch]' | LC_ALL=C sort | \
                              xargs cat | $(MD5SUM) | sed 's/ .*//')
+ifdef RELEASE_VERSION_MK
+version.mk:
+	echo "SFNT_RELEASE_CSUM := $(SFNT_SRC_CSUM)" > version.mk
+endif
 sinclude version.mk
-ifeq ($(SFNT_VERSION),)
-
-SFNT_VERSION	:= $(shell hg id --id 2>/dev/null || \
-  ( test -f ../.hg_archival.txt && \
-    awk '/node:/{print $$2}' ../.hg_archival.txt ) || \
-  echo no-version)
-else
+SFNT_VERSION	?= $(shell git rev-parse --short=7 HEAD || echo no-version)
 ifneq ($(SFNT_RELEASE_CSUM),$(SFNT_SRC_CSUM))
-SFNT_VERSION	:= $(SFNT_VERSION)-modified
+override SFNT_VERSION := $(SFNT_VERSION)-modified
 endif
-endif
+
 CPPFLAGS	+= -DSFNT_VERSION='"$(SFNT_VERSION)"'
 CPPFLAGS	+= -DSFNT_SRC_CSUM='"$(SFNT_SRC_CSUM)"'
 
@@ -84,3 +81,4 @@ endif
 
 
 include rules.mk
+
