@@ -1590,13 +1590,15 @@ static void* client_rx_thread(void* arg)
   crx->recs_n = 0;
   switch( handle_type ) {
   case HT_UDP:
-    NT_TRY2(crx->handle.fd, socket(PF_INET, SOCK_DGRAM, 0));
+    NT_TRY2(crx->handle.fd, socket(crx->af, SOCK_DGRAM, 0));
     if (crx->af == AF_INET6) {
       struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *) &ss;
+      sin6->sin6_family = AF_INET6;
       sin6->sin6_addr = in6addr_any;
       socklen = sizeof(*sin6);
     } else {
       struct sockaddr_in *sin = (struct sockaddr_in *) &ss;
+      sin->sin_family = AF_INET;
       sin->sin_addr.s_addr = INADDR_ANY;
       socklen = sizeof(*sin);
     }
