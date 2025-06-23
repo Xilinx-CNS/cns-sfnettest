@@ -264,8 +264,8 @@ static int            select_fds[MAX_FDS];
 static int            select_n_fds;
 static int            select_max_fd;
 
-static struct sockaddr*    to_sa;
-static socklen_t           to_sa_len;
+static struct sockaddr_storage  to_sa;
+static socklen_t                to_sa_len;
 
 /* Timeout for receives in milliseconds. */
 static int                 timeout_ms = 100;
@@ -297,7 +297,7 @@ static void noop_add(int fd)
 
 static ssize_t sfn_sendto(int fd, const void* buf, size_t len, int flags)
 {
-  return sendto(fd, buf, len, 0, to_sa, to_sa_len);
+  return sendto(fd, buf, len, 0, (struct sockaddr*)&to_sa, to_sa_len);
 }
 
 
@@ -1224,7 +1224,7 @@ static void client_send_sync(struct client_tx* ctx, enum msg_flags flags)
   ++msg->reply_seq;
   seq = ctx->next_seq++;
   msg->seq = NT_LE32(seq);
-  rc = send(ctx->write_fd, msg, ctx->msg_len, 0);
+  rc = do_send(ctx->write_fd, msg, ctx->msg_len, 0);
   NT_TESTi3(rc, ==, ctx->msg_len);
 }
 
@@ -1439,7 +1439,7 @@ static void client_do_test(struct client_tx* ctx)
       ++ctx->n_fall_behinds;
     }
     msg->send_lateness = msg->timestamp - ts_next_send;
-    rc = send(ctx->write_fd, msg, ctx->msg_len, 0);
+    rc = do_send(ctx->write_fd, msg, ctx->msg_len, 0);
     NT_TESTi3(rc, ==, ctx->msg_len);
     ts_last_send = msg->timestamp;
     ts_next_send += ticks_per_msg;
@@ -1485,7 +1485,7 @@ static void client_measure_rtt(struct client_tx* ctx, struct stats* stats)
     msg->seq = NT_LE32(seq);
     ++msg->reply_seq;
     sfnt_tsc(&msg->timestamp);
-    rc = send(ctx->write_fd, msg, msg_len, 0);
+    rc = do_send(ctx->write_fd, msg, msg_len, 0);
     NT_TESTi3(rc, ==, msg_len);
     rc = client_rx_wait_sync(crx, seq, 1000);
   }
@@ -1630,8 +1630,6 @@ static int do_client2(int ss, const char* hostport, int local)
   int one = 1;
   int af;
   struct addrinfo *ai;
-  struct sockaddr_storage sa;
-  socklen_t sa_len;
   int port;
 
   if( cfg_ipv4 )
@@ -1695,10 +1693,10 @@ static int do_client2(int ss, const char* hostport, int local)
   /* Look up address again but with known port and AF. */
   port = sfnt_sock_get_int(ss);
   NT_TRY_GAI(sfnt_getaddrinfo(af, hostport, NULL, port, &ai));
-  NT_ASSERT(ai->ai_addrlen <= sizeof(sa));
+  NT_ASSERT(ai->ai_addrlen <= sizeof(to_sa));
   NT_ASSERT(af == ai->ai_family);
-  memcpy(&sa, ai->ai_addr, ai->ai_addrlen);
-  sa_len = ai->ai_addrlen;
+  memcpy(&to_sa, ai->ai_addr, ai->ai_addrlen);
+  to_sa_len = ai->ai_addrlen;
   freeaddrinfo(ai);
 
   /* Create and bind/connect test socket. */
@@ -1708,7 +1706,7 @@ static int do_client2(int ss, const char* hostport, int local)
     if( cfg_nodelay )
       NT_TRY(setsockopt(ctx->read_fd, SOL_TCP, TCP_NODELAY,
                         &one, sizeof(one)));
-    NT_TRY(connect(ctx->read_fd, (struct sockaddr *) &sa, sa_len));
+    NT_TRY(connect(ctx->read_fd, (struct sockaddr *) &to_sa, to_sa_len));
     ctx->write_fd = ctx->read_fd;
     break;
   }
@@ -1731,7 +1729,7 @@ static int do_client2(int ss, const char* hostport, int local)
       NT_TRY_GAI(sfnt_connect(us, cfg_mcast, NULL, port));
     }
     else {
-      NT_TRY(connect(us, (struct sockaddr *) &sa, sa_len));
+      NT_TRY(connect(us, (struct sockaddr *) &to_sa, to_sa_len));
     }
     NT_TRY(getsockname(us, (struct sockaddr *) &replyaddr, &replyaddr_len));
     NT_TRY_GAI(getnameinfo((struct sockaddr *) &replyaddr, replyaddr_len,
