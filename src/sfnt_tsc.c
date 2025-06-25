@@ -12,6 +12,13 @@
 #include "sfnettest.h"
 
 
+#if defined(__linux__)
+/* Assume conversion from  bogomips to hz is multiply by 500,000.
+ * True for recent x86_64 CPUs.
+ * TODO: Implement platform independence. */
+#define BOGOMIPS2HZ 500000
+#endif
+
 static void measure_begin(struct sfnt_tsc_measure* measure)
 {
   uint64_t t_s;
@@ -109,6 +116,24 @@ int sfnt_tsc_get_params_end(const struct sfnt_tsc_measure* measure,
   return 0;
 }
 
+#if defined(__linux__)
+int sfnt_tsc_bogomips(struct sfnt_tsc_params* params)
+{
+  double frequency;
+  char buf[128];
+  FILE* f;
+  params->tsc_cost = measure_tsc();
+  NT_TEST((f = fopen("/proc/cpuinfo", "r")) != NULL);
+  while( 1 ) {
+    NT_TEST(fgets(buf, sizeof(buf), f) != NULL);
+    if( sscanf(buf, "bogomips : %lf", &frequency) == 1 ) {
+      fclose(f);
+      params->hz = (uint64_t)(frequency * BOGOMIPS2HZ);
+      return 0;
+    }
+  }
+}
+#endif
 
 int64_t sfnt_tsc_msec(const struct sfnt_tsc_params* params, int64_t tsc)
 {
