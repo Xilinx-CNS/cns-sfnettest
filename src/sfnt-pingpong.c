@@ -55,7 +55,9 @@ static unsigned    cfg_msg_more[2];
 static unsigned    cfg_v6only[2];
 static int         cfg_ipv4;
 static int         cfg_ipv6;
-
+#if defined(__linux__)
+static int         cfg_bogomips;
+#endif
 /* CL1* args take a single value (either applying to both client and server
  * or just one end).  CL2* args take either one value (used for both client
  * and server) or separate values for client and server separated by ';'.
@@ -116,6 +118,9 @@ static struct sfnt_cmd_line_opt cfg_opts[] = {
   CL2F("v6only",      cfg_v6only,      "enable IPV6_V6ONLY sockopt"          ),
   CL1F("ipv4",        cfg_ipv4,        "use IPv4 only"                       ),
   CL1F("ipv6",        cfg_ipv6,        "use IPv6 only"                       ),
+#if defined(__linux__)
+  CL1F("bogomips",    cfg_bogomips,    "use bogomips for tsc_hz (Linux)"     ),
+#endif
 };
 #define N_CFG_OPTS (sizeof(cfg_opts) / sizeof(cfg_opts[0]))
 
@@ -895,7 +900,14 @@ static int do_server(void)
 {
   int sl = -1, sl6 = -1, ss, one = 1;
 
-  sfnt_tsc_get_params_begin(&tsc_measure);
+#if defined(__linux__)
+  if (cfg_bogomips)
+    sfnt_tsc_bogomips(&tsc);
+  else
+#endif
+  {
+    sfnt_tsc_get_params_begin(&tsc_measure);
+  }
 
   /* Open listening socket, and wait for client to connect. */
   /* The support for dual-stack v4/v6 sockets is variable (e.g. default value
@@ -980,8 +992,12 @@ static int do_server2(int ss)
   /* We don't need particularly accurate timing on the server side, so a
    * millisecond of calibration should be fine - it's only used for
    * timeouts */
-  NT_TRY(sfnt_tsc_get_params_end(&tsc_measure, &tsc, 1000));
-
+#if defined(__linux__)
+  if(!cfg_bogomips)
+#endif
+  {
+    NT_TRY(sfnt_tsc_get_params_end(&tsc_measure, &tsc, 1000));
+  }
   /* Create and bind/connect test socket. */
   switch( fd_type ) {
   case FDT_TCP: {
@@ -1250,7 +1266,14 @@ static int do_client(int argc, char* argv[])
   const char* fd_type_s;
   pid_t pid;
 
-  sfnt_tsc_get_params_begin(&tsc_measure);
+#if defined(__linux__)
+  if (cfg_bogomips)
+    sfnt_tsc_bogomips(&tsc);
+  else
+#endif
+  {
+    sfnt_tsc_get_params_begin(&tsc_measure);
+  }
 
   if( argc < 1 || argc > 2 )
     sfnt_fail_usage("wrong number of arguments");
@@ -1403,7 +1426,12 @@ static int do_client2(int ss, const char* hostport, int local)
 
   /* Very rough calibration so we've got enough data for the warmup and sys
    * info. We re-sample more accurately again after that */
-  NT_TRY(sfnt_tsc_get_params_end(&tsc_measure, &tsc, 100));
+#if defined(__linux__)
+  if(!cfg_bogomips)
+#endif
+  {
+    NT_TRY(sfnt_tsc_get_params_end(&tsc_measure, &tsc, 100));
+  }
   sfnt_dump_sys_info(&tsc);
   if( server_ld_preload != NULL )
     printf("# server LD_PRELOAD=%s\n", server_ld_preload);
@@ -1436,10 +1464,15 @@ static int do_client2(int ss, const char* hostport, int local)
   }
 
   do_warmup(ss, read_fd, write_fd);
-  old_tsc_hz = tsc.hz;
-  NT_TRY(sfnt_tsc_get_params_end(&tsc_measure, &tsc, 50000));
-  if( fabs((double)(int64_t)(tsc.hz - old_tsc_hz) / old_tsc_hz) > .01 )
-    printf("# WARNING: tsc_hz changed to %"PRIu64" on recheck\n", tsc.hz);
+#if defined(__linux__)
+  if(!cfg_bogomips)
+#endif
+  {
+    old_tsc_hz = tsc.hz;
+    NT_TRY(sfnt_tsc_get_params_end(&tsc_measure, &tsc, 50000));
+    if( fabs((double)(int64_t)(tsc.hz - old_tsc_hz) / old_tsc_hz) > .01 )
+      printf("# WARNING: tsc_hz changed to %"PRIu64" on recheck\n", tsc.hz);
+  }
   for( i = 0; i < msg_sizes.len; ++i )
     do_test(ss, read_fd, write_fd, msg_sizes.list[i], results);
 

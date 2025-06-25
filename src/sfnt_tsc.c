@@ -109,6 +109,25 @@ int sfnt_tsc_get_params_end(const struct sfnt_tsc_measure* measure,
   return 0;
 }
 
+#if defined(__linux__)
+int sfnt_tsc_bogomips(struct sfnt_tsc_params* params)
+{
+  params->tsc_cost = 0;
+  double frequency;
+  char buf[128];
+  FILE* f;
+  NT_TEST((f = fopen("/proc/cpuinfo", "r")) != NULL);
+  while( 1 ) {
+    NT_TEST(fgets(buf, sizeof(buf), f) != NULL);
+    if( sscanf(buf, "bogomips : %lf", &frequency) == 1 ) {
+      /* Bogomips is twice CPU speed, in MHz, so multiply by 500000 for Hz */
+      fclose(f);
+      params->hz = (uint64_t)(frequency * 500000.0);
+      return 0;
+    }
+  }
+}
+#endif
 
 int64_t sfnt_tsc_msec(const struct sfnt_tsc_params* params, int64_t tsc)
 {
