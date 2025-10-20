@@ -67,7 +67,7 @@ static uint64_t measure_end(const struct sfnt_tsc_measure* measure,
   /* ?? TODO: handle this better */
   NT_TEST(skew == 0);
 
-  return (tsc_e - tsc_s) * t_freq / ticks;
+  return (uint64_t)(((tsc_e - tsc_s) / (double)ticks) * t_freq);
 }
 
 
