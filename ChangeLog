@@ -4,6 +4,11 @@
 sfnettest-1.6.0
 ---------------
 
+- Fix behaviour of sfnt-stream --connect. Now will not connect by default.
+- Avoid wrap in tsc_hz calculation
+- Version using git
+- Add github docker build flow
+- Update READMEs to Markdown
 - Use 64-bit values to avoid overflow with large nanosecond times or variances
 - Use monotonic clock for timing
 - Add IPv6 support
