@@ -260,6 +260,9 @@ extern int sfnt_tsc_get_params_end(const struct sfnt_tsc_measure* measure,
                                    struct sfnt_tsc_params* params,
                                    int interval_usec);
 
+#if defined(__linux__)
+extern int sfnt_tsc_bogomips(struct sfnt_tsc_params* params);
+#endif
 /* Convert tsc delta to milliseconds. */
 extern int64_t sfnt_tsc_msec(const struct sfnt_tsc_params*, int64_t tsc);
 
