@@ -1784,6 +1784,7 @@ static int do_client3(struct client_tx* ctx)
   if( ctx->server_ld_preload != NULL )
     printf("# server LD_PRELOAD=%s\n", ctx->server_ld_preload);
   printf("# percentile=%g\n", (double) cfg_percentile);
+  printf("# reporting: %s\n", cfg_rtt ? "RTT" : "1/2 RTT");
   printf("# msgsize=%zu\n", cfg_msg_size);
   fflush(stdout);
 
