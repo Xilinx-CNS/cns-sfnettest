@@ -157,7 +157,7 @@ static int            the_fds[4];  /* used for pipes and unix sockets */
 
 static fd_set         select_fdset;
 static int            select_fds[MAX_FDS];
-static int            select_n_fds;
+static unsigned       select_n_fds;
 static int            select_max_fd;
 
 static struct sockaddr_storage  my_sa;
@@ -232,11 +232,12 @@ static ssize_t sfn_sendto(int fd, const void* buf, size_t len, NT_UNUSED int fla
 static ssize_t rfn_read(int fd, void* buf, size_t len, int flags)
 {
   /* NB. To support non-blocking semantics caller must have set O_NONBLOCK. */
-  int rc, got = 0, all = flags & MSG_WAITALL;
+  ssize_t rc, got = 0, end = len;
+  bool all = flags & MSG_WAITALL;
   do {
-    if( (rc = read(fd, (char*) buf + got, len - got)) > 0 )
+    if( (rc = read(fd, (char*) buf + got, end - got)) > 0 )
       got += rc;
-  } while( all && got < len && rc > 0 );
+  } while( all && got < end && rc > 0 );
   return got ? got : rc;
 }
 
@@ -263,10 +264,12 @@ static void select_add(int fd)
 }
 
 
-static ssize_t select_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t select_recv(int fd, void* buf, size_t buf_len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
-  int i, rc, got = 0, all = flags & MSG_WAITALL;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
+  unsigned int i;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
@@ -305,10 +308,11 @@ static void poll_add(int fd)
 }
 
 
-static ssize_t poll_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t poll_recv(int fd, void* buf, size_t buf_len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
-  int rc, got = 0, all = flags & MSG_WAITALL;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
@@ -350,11 +354,12 @@ static void epoll_add(int fd)
 }
 
 
-static ssize_t epoll_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t epoll_recv(int fd, void* buf, size_t buf_len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
   struct epoll_event e;
-  int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
@@ -377,11 +382,12 @@ static ssize_t epoll_recv(int fd, void* buf, size_t len, int flags)
 }
 
 
-static ssize_t epoll_mod_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t epoll_mod_recv(int fd, void* buf, size_t buf_len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
   struct epoll_event e;
-  int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
@@ -408,11 +414,12 @@ static ssize_t epoll_mod_recv(int fd, void* buf, size_t len, int flags)
 }
 
 
-static ssize_t epoll_adddel_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t epoll_adddel_recv(int fd, void* buf, size_t buf_len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
   struct epoll_event e;
-  int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
@@ -442,9 +449,10 @@ static ssize_t epoll_adddel_recv(int fd, void* buf, size_t len, int flags)
 
 /**********************************************************************/
 
-static ssize_t spin_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t spin_recv(int fd, void* buf, size_t buf_len, int flags)
 {
-  int rc, got = 0, all = flags & MSG_WAITALL;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   do {
     while( (rc = do_recv(fd, (char*) buf + got, len - got, flags)) < 0 )
@@ -1189,7 +1197,7 @@ static void do_test(int ss, int read_fd, int write_fd,
 static unsigned log2_le(unsigned n)
 {
   unsigned order = 0;
-  while( (1 << order) <= n )
+  while( (1u << order) <= n )
     ++order;
   return order - 1;
 }
@@ -1473,7 +1481,7 @@ int main(int argc, char* argv[])
   if( cfg_minms > cfg_maxms )
     cfg_maxms = cfg_minms;
   NT_ASSERT(cfg_maxiter >= cfg_miniter);
-  timeout_ms = cfg_timeout[0] ? cfg_timeout[0] * 1000 : -1;
+  timeout_ms = cfg_timeout[0] ? (int) cfg_timeout[0] * 1000 : -1;
 
 #if defined(__unix__) ||  defined(__APPLE__)
   if( cfg_forkboth ) {

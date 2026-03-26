@@ -63,8 +63,8 @@ static int decode_hostport(char *str, size_t str_sz,
       (firstcolon == lastcolon ||
        (percent && lastcolon > percent) ||
        (closesquare && closesquare < lastcolon)) ) {
-    int hostlen = lastcolon - host;
-    if( hostlen >= str_sz )
+    ssize_t hostlen = lastcolon - host;
+    if( hostlen >= (ssize_t) str_sz )
       return EAI_OVERFLOW;
     strncpy(str, host, hostlen);
     str[hostlen] = '\0';

@@ -19,7 +19,7 @@
 
 #define DEFAULT_MSG_SIZE  24
 
-static int         cfg_msg_size = DEFAULT_MSG_SIZE;
+static size_t      cfg_msg_size = DEFAULT_MSG_SIZE;
 static const char* cfg_rates = "50000-100000000+50000";
 static int         cfg_millisec = 2000;
 static int         cfg_samples;
@@ -182,8 +182,8 @@ struct client_rx {
   int                   port;
   volatile int          n_rx;
   struct client_rx_rec* recs;
-  int                   recs_max;
-  int                   recs_n;
+  unsigned              recs_max;
+  unsigned              recs_n;
   uint32_t              sync_seq;
   int                   af; /* Input to thread */
 };
@@ -260,7 +260,7 @@ static int            the_fds[4];  /* used for pipes and unix sockets */
 
 static fd_set         select_fdset;
 static int            select_fds[MAX_FDS];
-static int            select_n_fds;
+static unsigned       select_n_fds;
 static int            select_max_fd;
 
 static struct sockaddr_storage  to_sa;
@@ -303,10 +303,11 @@ static ssize_t sfn_sendto(int fd, const void* buf, size_t len, NT_UNUSED int fla
 #define sfn_send  send
 
 
-static ssize_t rfn_read(int fd, void* buf, size_t len, int flags)
+static ssize_t rfn_read(int fd, void* buf, size_t buf_len, int flags)
 {
   /* NB. To support non-blocking semantics caller must have set O_NONBLOCK. */
-  int rc, got = 0, all = flags & MSG_WAITALL;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
   do {
     if( (rc = read(fd, (char*) buf + got, len - got)) > 0 )
       got += rc;
@@ -337,11 +338,12 @@ static void select_add(int fd)
 }
 
 
-static ssize_t select_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t select_recv(int fd, void* buf, size_t buf_len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
-  int i, rc, got = 0, all = flags & MSG_WAITALL;
-  flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
+  unsigned i;
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
   do {
@@ -379,10 +381,11 @@ static void poll_add(int fd)
 }
 
 
-static ssize_t poll_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t poll_recv(int fd, void* buf, size_t buf_len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
-  int rc, got = 0, all = flags & MSG_WAITALL;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
@@ -425,11 +428,12 @@ static void epoll_add(int fd)
 }
 
 
-static ssize_t epoll_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t epoll_recv(int fd, void* buf, size_t buf_len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
   struct epoll_event e;
-  int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
@@ -453,11 +457,12 @@ static ssize_t epoll_recv(int fd, void* buf, size_t len, int flags)
 }
 
 
-static ssize_t epoll_mod_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t epoll_mod_recv(int fd, void* buf, size_t buf_len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
   struct epoll_event e;
-  int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
@@ -485,11 +490,12 @@ static ssize_t epoll_mod_recv(int fd, void* buf, size_t len, int flags)
 }
 
 
-static ssize_t epoll_adddel_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t epoll_adddel_recv(int fd, void* buf, size_t buf_len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
   struct epoll_event e;
-  int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
@@ -520,9 +526,10 @@ static ssize_t epoll_adddel_recv(int fd, void* buf, size_t len, int flags)
 
 /**********************************************************************/
 
-static ssize_t spin_recv(int fd, void* buf, size_t len, int flags)
+static ssize_t spin_recv(int fd, void* buf, size_t buf_len, int flags)
 {
-  int rc, got = 0, all = flags & MSG_WAITALL;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
   uint64_t tsc_now, tsc_timeout;
 
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
@@ -1085,7 +1092,7 @@ static void client_rx_go(struct client_rx* crx)
   struct client_rx_rec* rec;
   uint64_t now;
   int flags = 0;
-  int rc;
+  ssize_t rc;
 
   if( fd_type & FDTF_STREAM )
     flags |= MSG_WAITALL;
@@ -1096,7 +1103,7 @@ static void client_rx_go(struct client_rx* crx)
   while( 1 ) {
     rc = mux_recv(crx->sock, crx->reply, crx->reply_buf_len, flags);
     sfnt_tsc(&now);
-    if( rc >= sizeof(struct msg_reply) ) {
+    if( rc >= (ssize_t) sizeof(struct msg_reply) ) {
       if( crx->reply->flags & MF_SAVE ) {
         NT_TESTi3(crx->recs_n, <, crx->recs_max);
         rec = &crx->recs[crx->recs_n];
@@ -1117,7 +1124,7 @@ static void client_rx_go(struct client_rx* crx)
     }
     else {
       sfnt_err("ERROR: short read or error receiving\n");
-      sfnt_err("ERROR: rc=%d errno=(%d %s)\n", rc, errno, strerror(errno));
+      sfnt_err("ERROR: rc=%zd errno=(%d %s)\n", rc, errno, strerror(errno));
       sfnt_fail_test();
     }
   }
@@ -1266,7 +1273,7 @@ static void client_stop(struct client_tx* ctx)
   /* We're done.  We need to wait for everything to finish and tell client
    * rx thread to stop so we can gather results.
    */
-  int i;
+  unsigned i;
   const unsigned int max_retries = 50;
 
   client_rx_cmd_set(ctx->crx, CRXC_WAIT);
@@ -1307,7 +1314,7 @@ static void write_raw_results(struct client_tx* ctx)
 {
   char* fname = (char*) alloca(strlen(cfg_raw) + 60);
   FILE* f;
-  int i;
+  unsigned i;
 
   sprintf(fname, "%s-%d-%d.dat",
           cfg_raw, ctx->msg_len, ctx->msg_per_sec_target);
@@ -1359,7 +1366,7 @@ static void write_result_line(struct client_tx* ctx)
   int* send_jit = (int*) alloca(ctx->crx->recs_n * sizeof(int));
   int* lat = (int*) alloca(ctx->crx->recs_n * sizeof(int));
   struct stats l, j;
-  int i;
+  unsigned i;
 
   for( i = 0; i < crx->recs_n; ++i ) {
     struct client_rx_rec* r = &crx->recs[i];
@@ -1462,7 +1469,8 @@ static void client_measure_rtt(struct client_tx* ctx, struct stats* stats)
   struct msg* msg = ctx->msg;
   uint32_t seq;
   int msg_len;
-  int i, rc;
+  ssize_t rc;
+  unsigned i;
 
   /* We want symmetric ping-pongs, so that RTT/2 reflects the return path
    * latency.  Therefore use the reply size for forward send too.
@@ -1775,7 +1783,7 @@ static int do_client3(struct client_tx* ctx)
   if( ctx->server_ld_preload != NULL )
     printf("# server LD_PRELOAD=%s\n", ctx->server_ld_preload);
   printf("# percentile=%g\n", (double) cfg_percentile);
-  printf("# msgsize=%d\n", cfg_msg_size);
+  printf("# msgsize=%zu\n", cfg_msg_size);
   fflush(stdout);
 
   /* Measure single-trip latency when quiescent */
