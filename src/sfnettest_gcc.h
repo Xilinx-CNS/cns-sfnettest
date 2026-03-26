@@ -14,6 +14,11 @@
 
 #include <inttypes.h>
 
+#if __STDC_VERSION__ >= 202311L
+# define NT_UNUSED [[maybe_unused]]
+#else
+# define NT_UNUSED __attribute__((unused))
+#endif
 
 #define NT_PRINTF_LIKE(a, b)  __attribute__((format(printf,a,b)))
 

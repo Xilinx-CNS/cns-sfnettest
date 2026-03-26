@@ -285,7 +285,7 @@ static ssize_t (*mux_recv)(int, void*, size_t, int);
 static void (*mux_add)(int fd);
 
 
-static void noop_add(int fd)
+static void noop_add(NT_UNUSED int fd)
 {
 }
 
@@ -294,7 +294,7 @@ static void noop_add(int fd)
 #define rfn_recv  recv
 
 
-static ssize_t sfn_sendto(int fd, const void* buf, size_t len, int flags)
+static ssize_t sfn_sendto(int fd, const void* buf, size_t len, NT_UNUSED int flags)
 {
   return sendto(fd, buf, len, 0, (struct sockaddr*)&to_sa, to_sa_len);
 }
@@ -315,7 +315,7 @@ static ssize_t rfn_read(int fd, void* buf, size_t len, int flags)
 }
 
 
-static ssize_t sfn_write(int fd, const void* buf, size_t len, int flags)
+static ssize_t sfn_write(int fd, const void* buf, size_t len, NT_UNUSED int flags)
 {
   return write(fd, buf, len);
 }
@@ -1291,7 +1291,7 @@ int64_t rec_latency_ns(struct client_tx* ctx, struct client_rx_rec* r)
 }
 
 
-uint64_t rec_target_send_ts(struct client_tx* ctx, struct client_rx_rec* r)
+uint64_t rec_target_send_ts(NT_UNUSED struct client_tx* ctx, struct client_rx_rec* r)
 {
   return r->ts_send - r->send_lateness;
 }

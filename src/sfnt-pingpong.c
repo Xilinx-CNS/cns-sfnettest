@@ -184,7 +184,7 @@ static ssize_t (*mux_recv)(int, void*, size_t, int);
 static void (*mux_add)(int fd);
 
 
-static void noop_add(int fd)
+static void noop_add(NT_UNUSED int fd)
 {
 }
 
@@ -220,7 +220,7 @@ ssize_t solaris_recv(int s, void *buf, size_t len, int flags)
 #endif
 
 
-static ssize_t sfn_sendto(int fd, const void* buf, size_t len, int flags)
+static ssize_t sfn_sendto(int fd, const void* buf, size_t len, NT_UNUSED int flags)
 {
   return sendto(fd, buf, len, 0, to_sa, to_sa_len);
 }
@@ -241,7 +241,7 @@ static ssize_t rfn_read(int fd, void* buf, size_t len, int flags)
 }
 
 
-static ssize_t sfn_write(int fd, const void* buf, size_t len, int flags)
+static ssize_t sfn_write(int fd, const void* buf, size_t len, NT_UNUSED int flags)
 {
   return write(fd, buf, len);
 }
