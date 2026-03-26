@@ -12,10 +12,19 @@
 #ifndef __SFNETTEST_H__
 #define __SFNETTEST_H__
 
+/* Access POSIX clock_*() and getaddrinfo() families and kill(), behind
+ * glibc feature test macros. */
+#define _XOPEN_SOURCE 700
+
+/* Access usleep(3) through glibc feature test macros before unist.h
+ * gets indirectly included. */
+#define _DEFAULT_SOURCE
+
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <stdint.h>
 #include <assert.h>
 #include <math.h>
