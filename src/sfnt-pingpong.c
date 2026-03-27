@@ -1031,6 +1031,8 @@ static int do_server2(int ss)
   case FDT_UNIX_D:
     read_fd = write_fd = the_fds[1];
     break;
+  default:
+    NT_ASSERT(0);
   }
   if( fd_type & FDTF_SOCKET ) {
     set_sock_timeouts(read_fd);
@@ -1395,6 +1397,8 @@ static int do_client2(int ss, const char* hostport, int local)
   case FDT_UNIX_D:
     read_fd = write_fd = the_fds[0];
     break;
+  default:
+    NT_ASSERT(0);
   }
   if( fd_type & FDTF_SOCKET )
   {
