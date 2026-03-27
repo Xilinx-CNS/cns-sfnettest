@@ -1686,6 +1686,7 @@ static int do_client2(int ss, const char* hostport, int local)
   do_init();
   client_send_opts(ss);
   ctx = malloc(sizeof(*ctx));
+  NT_ASSERT(ctx);
   ctx->ss = ss;
   ctx->crx = client_rx_thread_start(af);
 

@@ -414,6 +414,7 @@ static void parse_cfg_string(char* s)
   }
 
   argv = malloc(argc * sizeof(char*));
+  NT_ASSERT(argv);
   argc = 0;
   p = s;
   for( ; ; ) {
