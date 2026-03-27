@@ -138,9 +138,9 @@ extern void sfnt_out(const char* fmt, ...) NT_PRINTF_LIKE(1,2);
  * Runtime checks, failure paths etc.
  */
 
-extern void sfnt_abort(void);
-extern void sfnt_fail_test(void);
-extern void sfnt_fail_setup(void);
+NT_NORETURN void sfnt_abort(void);
+NT_NORETURN void sfnt_fail_test(void);
+NT_NORETURN void sfnt_fail_setup(void);
 
 
 #define __NT_TEST(x, fail_fn)                           \

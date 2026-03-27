@@ -21,8 +21,10 @@
 
 #if __STDC_VERSION__ >= 202311L
 # define NT_UNUSED [[maybe_unused]]
+# define NT_NORETURN [[noreturn]]
 #else
 # define NT_UNUSED
+# define NT_NORETURN
 #endif
 
 #ifndef inline
