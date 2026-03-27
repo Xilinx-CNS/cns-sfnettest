@@ -811,11 +811,6 @@ static int do_server(void)
       NT_TRY(listen(sl6, 1));
     }
   }
-  if( sl < 0 && sl6 < 0 ) {
-    sfnt_err("%s: server: cannot specify both --ipv4 and --ipv6\n",
-             sfnt_app_name);
-    exit(3);
-  }
   if( ! sfnt_quiet )
     sfnt_err("%s: server: waiting for client to connect...\n", sfnt_app_name);
   if( sl >= 0 && sl6 >= 0 ) {
@@ -843,6 +838,11 @@ static int do_server(void)
   }
   else if( sl6 >= 0 ) {
     NT_TRY2(ss, accept(sl6, NULL, NULL));
+  }
+  else {
+    sfnt_err("%s: server: cannot specify both --ipv4 and --ipv6\n",
+             sfnt_app_name);
+    exit(3);
   }
   if( ! sfnt_quiet )
     sfnt_err("%s: server: client connected\n", sfnt_app_name);
