@@ -161,7 +161,7 @@ int sfnt_select(int nfds, fd_set* readfds, fd_set* writefds,
   }
 
   rc = select(nfds, readfds, writefds, exceptfds, timeout);
-  if( return_now(rc, flags, timeout_ms) )
+  if( timeout_ms == 0 || return_now(rc, flags, timeout_ms) )
     return rc;
 
   tsc_timeout = calc_tsc_timeout(tscp, timeout_ms);
