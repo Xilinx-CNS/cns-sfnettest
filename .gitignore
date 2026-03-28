@@ -14,6 +14,7 @@
 *.sdf
 *.opensdf
 *.suo
+version.mk
 sfnt-pingpong
 sfnt-stream
 

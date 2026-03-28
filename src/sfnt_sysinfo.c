@@ -87,7 +87,7 @@ void sfnt_dump_sys_info(const struct sfnt_tsc_params* tsc_opt)
            " | head -1 | sed 's/^/# cpu: /'");
     system("PATH=\"/sbin:$PATH\" lspci | grep -i net | sed 's/^/# lspci: /'");
     system("for if in $(cd /sys/class/net && /bin/ls); do"
-           " ethtool -i $if 2>/dev/null | egrep 'bus-info|driver|^vers'"
+           " ethtool -i $if 2>/dev/null | grep -E 'bus-info|driver|^vers'"
            " | sed \"s/^/# $if: /\"; done");
     system("grep MemTotal /proc/meminfo | sed 's/^/# ram: /'");
 #endif

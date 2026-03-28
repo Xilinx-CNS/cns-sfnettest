@@ -262,8 +262,8 @@ static int            select_max_fd;
 static struct sockaddr_in  my_sa;
 #endif
 
-static struct sockaddr*    to_sa;
-static socklen_t           to_sa_len;
+static struct sockaddr_storage  to_sa;
+static socklen_t                to_sa_len;
 
 /* Timeout for receives in milliseconds. */
 static int                 timeout_ms = 100;
@@ -358,7 +358,7 @@ rfn_recv(union handle h, void* buf, size_t len, int flags)
 static ssize_t
 sfn_sendto(union handle h, const void* buf, size_t len, int flags)
 {
-  return sendto(h.fd, buf, len, 0, to_sa, to_sa_len);
+  return sendto(h.fd, buf, len, 0, (struct sockaddr*)&to_sa, to_sa_len);
 }
 
 
@@ -1307,9 +1307,10 @@ static int do_server2(int ss)
   NT_TRY_GAI(sfnt_getaddrinfo(AF_UNSPEC, hostport, NULL,
                               -1, &client->addrinfo));
   free(hostport);
-  to_sa = client->addrinfo->ai_addr;
+  NT_ASSERT(client->addrinfo->ai_addrlen <= sizeof(to_sa));
+  NT_ASSERT(af == AF_UNSPEC || af == client->addrinfo->ai_family);
+  memcpy(&to_sa, client->addrinfo->ai_addr, client->addrinfo->ai_addrlen);
   to_sa_len = client->addrinfo->ai_addrlen;
-
 #ifdef USE_ZF
   if( handle_type == HT_ZF_UDP )
     NT_TRY(zfut_alloc(&server.write_handle.ut, ztack,
@@ -2091,8 +2092,6 @@ static int do_client2(int ss, const char* hostport, int local)
   int one = 1;
   int af;
   struct addrinfo *ai;
-  struct sockaddr_storage sa;
-  socklen_t sa_len;
   int port;
 
   if( cfg_ipv4 )
@@ -2163,10 +2162,10 @@ static int do_client2(int ss, const char* hostport, int local)
   /* Look up address again but with known port and AF. */
   port = sfnt_sock_get_int(ss);
   NT_TRY_GAI(sfnt_getaddrinfo(af, hostport, NULL, port, &ai));
-  NT_ASSERT(ai->ai_addrlen <= sizeof(sa));
+  NT_ASSERT(ai->ai_addrlen <= sizeof(to_sa));
   NT_ASSERT(af == ai->ai_family);
-  memcpy(&sa, ai->ai_addr, ai->ai_addrlen);
-  sa_len = ai->ai_addrlen;
+  memcpy(&to_sa, ai->ai_addr, ai->ai_addrlen);
+  to_sa_len = ai->ai_addrlen;
   freeaddrinfo(ai);
 
   /* Create and bind/connect test socket. */
@@ -2176,7 +2175,7 @@ static int do_client2(int ss, const char* hostport, int local)
     if( cfg_nodelay )
       NT_TRY(setsockopt(ctx->read_handle.fd, SOL_TCP, TCP_NODELAY,
                         &one, sizeof(one)));
-    NT_TRY(connect(ctx->read_handle.fd, (struct sockaddr *) &sa, sa_len));
+    NT_TRY(connect(ctx->read_handle.fd, (struct sockaddr *) &to_sa, to_sa_len));
     ctx->write_handle.fd = ctx->read_handle.fd;
     break;
   }
@@ -2199,7 +2198,7 @@ static int do_client2(int ss, const char* hostport, int local)
       NT_TRY_GAI(sfnt_connect(us, cfg_mcast, NULL, port));
     }
     else {
-      NT_TRY(connect(us, (struct sockaddr *) &sa, sa_len));
+      NT_TRY(connect(us, (struct sockaddr *) &to_sa, to_sa_len));
     }
     NT_TRY(getsockname(us, (struct sockaddr *) &replyaddr, &replyaddr_len));
     NT_TRY_GAI(getnameinfo((struct sockaddr *) &replyaddr, replyaddr_len,
