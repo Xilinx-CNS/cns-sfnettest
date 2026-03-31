@@ -613,14 +613,14 @@ static ssize_t sfn_dpdk_send(union handle h, const void* buf, size_t len,
 #endif
 
 /**********************************************************************/
-static void handle_msg(void* iov_base, int len)
+static void handle_msg(NT_UNUSED void* iov_base, NT_UNUSED int len)
 {
 }
 
 /**********************************************************************/
 
 static enum onload_zc_callback_rc
-zc_recv_callback(struct onload_zc_recv_args *args, int flag)
+zc_recv_callback(struct onload_zc_recv_args *args, NT_UNUSED int flag)
 {
   struct user_info *zc_info = (struct user_info *)args->user_ptr;
   int i, zc_rc = 0;
@@ -651,7 +651,7 @@ zc_recv_callback(struct onload_zc_recv_args *args, int flag)
 
 /**********************************************************************/
 
-static ssize_t do_recv_zc(union handle h, void* buf, size_t len, int flags)
+static ssize_t do_recv_zc(union handle h, NT_UNUSED void* buf, size_t len, int flags)
 {
   struct user_info info;
   int rc;
@@ -680,8 +680,8 @@ static ssize_t do_recv_zc(union handle h, void* buf, size_t len, int flags)
 }
 
 
-static ssize_t do_send_zc(union handle h, const void* buf, size_t len,
-                          int flags)
+static ssize_t do_send_zc(union handle h, NT_UNUSED const void* buf,
+                          size_t len, NT_UNUSED int flags)
 {
   int bytes_done, rc, i, bufs_needed;
 
@@ -770,7 +770,7 @@ static ssize_t do_send_zc(union handle h, const void* buf, size_t len,
 
 /**********************************************************************/
 
-static void do_tmpl_alloc(int fd, const void* buf, size_t len, int flags)
+static void do_tmpl_alloc(int fd, const void* buf, size_t len, NT_UNUSED int flags)
 {
   int rc;
   NT_ASSERT(tmpl_update_size >= 0 && tmpl_update_size <= len);

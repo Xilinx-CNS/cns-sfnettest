@@ -88,14 +88,17 @@ int sfnt_poll(struct pollfd* fds, nfds_t nfds, int timeout_ms,
 
 
 #if NT_HAVE_EPOLL
-int sfnt_epolltype_wait(const union handle h, const enum handle_type h_type,
+int sfnt_epolltype_wait(const union handle h,
+                        const enum handle_type h_type,
                         struct epoll_event* events, int maxevents,
-		        int timeout_ms, const struct sfnt_tsc_params* tscp,
-		        enum sfnt_mux_flags flags)
+                        int timeout_ms, const struct sfnt_tsc_params* tscp,
+                        enum sfnt_mux_flags flags)
 {
   int use_timeout_ms = (flags & NT_MUX_SPIN) ? 0 : timeout_ms;
 #if USE_ZF
   int64_t use_timeout_ns = use_timeout_ms * 1000000;
+#else
+  (void) h_type; /* Compat subst for [[maybe_unused]] on formal argument. */
 #endif
   uint64_t tsc_now, tsc_timeout;
   int rc;

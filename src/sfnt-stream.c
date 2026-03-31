@@ -309,7 +309,7 @@ static void noop_add(NT_UNUSED int fd)
 
 /**********************************************************************/
 
-static void handle_msg(void* buf, void* iov_base, int len)
+static void handle_msg(NT_UNUSED void* buf, void* iov_base, int len)
 {
   send_iov[send_iov_i].iov_base = iov_base;
   send_iov[send_iov_i].iov_len = len;
@@ -318,7 +318,7 @@ static void handle_msg(void* buf, void* iov_base, int len)
 
 
 static enum onload_zc_callback_rc
-zc_recv_callback(struct onload_zc_recv_args *args, int flag)
+zc_recv_callback(struct onload_zc_recv_args *args, NT_UNUSED int flag)
 {
   int i,len;
   /* If we hit this assert then we have received a datagram which
@@ -733,7 +733,8 @@ static ssize_t spin_recv(union handle h, void* buf, size_t buf_len, int flags)
 
 /**********************************************************************/
 
-static ssize_t do_recv_zc(union handle h, void* buf, size_t len, int flags)
+static ssize_t do_recv_zc(union handle h, NT_UNUSED void* buf,
+                          NT_UNUSED size_t len, int flags)
 {
   struct onload_zc_recv_args zc_args;
   int rc, j,k;
