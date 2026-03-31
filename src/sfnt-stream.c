@@ -1200,9 +1200,9 @@ static int do_server2(int ss)
   union handle read_handle, write_handle;
   struct sockaddr_storage sa;
   socklen_t sal = sizeof(sa);
+  char* hostport;
   int rc;
   int af;
-  char* hostport;
 
   if( cfg_ipv4 )
     af = AF_INET;
