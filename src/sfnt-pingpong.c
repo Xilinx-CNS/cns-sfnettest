@@ -223,7 +223,7 @@ static socklen_t                to_sa_len;
 static int                 timeout_ms;
 
 static onload_template_handle tmpl_handle;
-static int                    tmpl_update_size;
+static size_t                 tmpl_update_size;
 
 #if NT_HAVE_POLL
 static struct pollfd       pfds[MAX_FDS];
@@ -627,10 +627,10 @@ zc_recv_callback(struct onload_zc_recv_args *args, NT_UNUSED int flag)
 
   if(args->msg.msghdr.msg_iovlen == 1) {
     zc_rc += args->msg.iov[0].iov_len;
-    handle_msg(args->msg.iov[0].iov_base, args->msg.iov[0].iov_len);
+    handle_msg(args->msg.iov[0].iov_base, (int) args->msg.iov[0].iov_len);
   }
   else {
-    for( i = 0; i < args->msg.msghdr.msg_iovlen; ++i ) {
+    for( i = 0; i < (int) args->msg.msghdr.msg_iovlen; ++i ) {
       zc_rc += args->msg.iov[i].iov_len;
       handle_msg(args->msg.iov[i].iov_base, args->msg.iov[i].iov_len);  
     }
@@ -683,7 +683,8 @@ static ssize_t do_recv_zc(union handle h, NT_UNUSED void* buf, size_t len, int f
 static ssize_t do_send_zc(union handle h, NT_UNUSED const void* buf,
                           size_t len, NT_UNUSED int flags)
 {
-  int bytes_done, rc, i, bufs_needed;
+  size_t bytes_done, i;
+  int rc, bufs_needed;
 
   /* This assumes that iovec has been initialised with zc buffers by
    * the caller.  It will replenish iovec with buffers that are
@@ -724,8 +725,8 @@ static ssize_t do_send_zc(union handle h, NT_UNUSED const void* buf,
       bytes_done = 0;
       bufs_needed = 0;
       while( i < zc_mmsg.msg.msghdr.msg_iovlen ) {
-        if( bytes_done == zc_mmsg.rc ) {
-          printf("onload_zc_send did not send iovec %d\n", i);
+        if( (int) bytes_done == zc_mmsg.rc ) {
+          printf("onload_zc_send did not send iovec %zd\n", i);
           /* In other buffer allocation schemes we would have to release
            * these buffers, but seems pointless as we guarantee at the
            * end of this function to have iovec array full, so do nothing.
@@ -740,8 +741,8 @@ static ssize_t do_send_zc(union handle h, NT_UNUSED const void* buf,
           ++bufs_needed;
           
           if( zc_mmsg.rc - bytes_done < zc_iovec[i].iov_len ) {
-            printf("onload_zc_send partial send (%d of %d) of zc_iovec %d\n",
-                   zc_mmsg.rc - bytes_done, (int)zc_iovec[i].iov_len, i);
+            printf("onload_zc_send partial send (%zd of %" PRIu64 ") of zc_iovec %zd\n",
+                   zc_mmsg.rc - bytes_done, (uint64_t) zc_iovec[i].iov_len, i);
             bytes_done = zc_mmsg.rc;
           }
           else
@@ -773,7 +774,7 @@ static ssize_t do_send_zc(union handle h, NT_UNUSED const void* buf,
 static void do_tmpl_alloc(int fd, const void* buf, size_t len, NT_UNUSED int flags)
 {
   int rc;
-  NT_ASSERT(tmpl_update_size >= 0 && tmpl_update_size <= len);
+  NT_ASSERT(tmpl_update_size <= len);
   NT_ASSERT(cfg_tmpl_send[0] >= 0 && cfg_tmpl_send[0] <= 100);
 
   struct iovec iovec = {
@@ -826,7 +827,7 @@ static ssize_t do_send_tmpl(union handle h, const void* buf, size_t len,
                             int flags)
 {
   int rc;
-  NT_ASSERT(tmpl_update_size >= 0 && tmpl_update_size <= len);
+  NT_ASSERT(tmpl_update_size <= len);
   NT_ASSERT(cfg_tmpl_send[0] >= 0 && cfg_tmpl_send[0] <= 100);
   NT_ASSERT(flags == 0);
 
@@ -1118,7 +1119,9 @@ static ssize_t spin_recv(union handle h, void* buf, size_t buf_len, int flags)
 
 static ssize_t warm_recv(union handle h, void* buf, size_t len, int flags)
 {
-  int rc, got = 0, all = flags & MSG_WAITALL;
+  size_t got = 0;
+  int rc;
+  bool all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   do {
     rc = do_recv(h, (char*) buf + got, len - got, flags);
@@ -1134,7 +1137,7 @@ static ssize_t warm_recv(union handle h, void* buf, size_t len, int flags)
     }
   } while( all && got < len && rc > 0 );
  out:
-  return got ? got : rc;
+  return got ? (ssize_t) got : rc;
 }
 
 /**********************************************************************/

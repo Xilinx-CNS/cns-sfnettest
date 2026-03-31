@@ -325,7 +325,7 @@ zc_recv_callback(struct onload_zc_recv_args *args, NT_UNUSED int flag)
    * requires more than MAX_BUFS_PER_PKT.  It is safe to increase
    * the value of MAX_BUFS_PER_PKT if this is needed.
    */     
-  assert(args->msg.msghdr.msg_iovlen < (BUF_SZ - send_iov_i));
+  assert((int) args->msg.msghdr.msg_iovlen < (BUF_SZ - send_iov_i));
 
   if(args->msg.msghdr.msg_iovlen == 1){
     len = args->msg.iov[0].iov_len;
@@ -333,7 +333,7 @@ zc_recv_callback(struct onload_zc_recv_args *args, NT_UNUSED int flag)
   } 
   else {
     len = 0;
-    for( i = 0; i < args->msg.msghdr.msg_iovlen; ++i ) {
+    for( i = 0; i < (int) args->msg.msghdr.msg_iovlen; ++i ) {
       len += args->msg.iov[i].iov_len;
       handle_msg(args->msg.iov[i].buf, args->msg.iov[i].iov_base, args->msg.iov[i].iov_len);
     }
@@ -774,7 +774,7 @@ static ssize_t do_recv_zc(union handle h, NT_UNUSED void* buf,
     }
     else{
       rc = 0;
-      for( j = 0; j < zc_args.msg.msghdr.msg_iovlen; ++j )
+      for( j = 0; j < (int) zc_args.msg.msghdr.msg_iovlen; ++j )
         rc += zc_args.msg.iov[j].iov_len;
     }
   }
