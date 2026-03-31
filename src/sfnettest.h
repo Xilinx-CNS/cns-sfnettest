@@ -12,10 +12,20 @@
 #ifndef __SFNETTEST_H__
 #define __SFNETTEST_H__
 
+/* Access POSIX clock_*() and getaddrinfo() families and kill(), behind
+ * glibc feature test macros. */
+#define _XOPEN_SOURCE 700
+
+/* Access usleep(3) through glibc feature test macros before unist.h
+ * gets indirectly included. */
+#define _DEFAULT_SOURCE
+
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <stdint.h>
 #include <assert.h>
 #include <math.h>
@@ -128,9 +138,9 @@ extern void sfnt_out(const char* fmt, ...) NT_PRINTF_LIKE(1,2);
  * Runtime checks, failure paths etc.
  */
 
-extern void sfnt_abort(void);
-extern void sfnt_fail_test(void);
-extern void sfnt_fail_setup(void);
+NT_NORETURN void sfnt_abort(void);
+NT_NORETURN void sfnt_fail_test(void);
+NT_NORETURN void sfnt_fail_setup(void);
 
 
 #define __NT_TEST(x, fail_fn)                           \

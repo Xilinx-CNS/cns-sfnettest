@@ -19,6 +19,14 @@
  */
 #define NT_PRINTF_LIKE(a, b)
 
+#if __STDC_VERSION__ >= 202311L
+# define NT_UNUSED [[maybe_unused]]
+# define NT_NORETURN [[noreturn]]
+#else
+# define NT_UNUSED
+# define NT_NORETURN
+#endif
+
 #ifndef inline
 # define inline __inline
 #endif

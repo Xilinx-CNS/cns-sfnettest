@@ -211,7 +211,7 @@ static int              the_fds[4];  /* used for pipes and unix sockets */
 
 static fd_set           select_fdset;
 static int              select_fds[MAX_FDS];
-static int              select_n_fds;
+static unsigned         select_n_fds;
 static int              select_max_fd;
 
 static struct sockaddr_storage  my_sa;
@@ -270,7 +270,7 @@ static ssize_t (*mux_recv)(union handle, void*, size_t, int);
 static void (*mux_add)(int fd);
 
 
-static void noop_add(int fd)
+static void noop_add(NT_UNUSED int fd)
 {
 }
 
@@ -311,7 +311,7 @@ rfn_recv(union handle h, void* buf, size_t len, int flags)
 
 
 static ssize_t sfn_sendto(union handle h, const void* buf, size_t len,
-                          int flags)
+                          NT_UNUSED int flags)
 {
   return sendto(h.fd, buf, len, 0, to_sa, to_sa_len);
 }
@@ -327,16 +327,17 @@ sfn_send(union handle h, const void* buf, size_t len, int flags)
 static ssize_t rfn_read(union handle h, void* buf, size_t len, int flags)
 {
   /* NB. To support non-blocking semantics caller must have set O_NONBLOCK. */
-  int rc, got = 0, all = flags & MSG_WAITALL;
+  ssize_t rc, got = 0, end = len;
+  bool all = flags & MSG_WAITALL;
   do {
-    if( (rc = read(h.fd, (char*) buf + got, len - got)) > 0 )
+    if( (rc = read(h.fd, (char*) buf + got, end - got)) > 0 )
       got += rc;
-  } while( all && got < len && rc > 0 );
+  } while( all && got < end && rc > 0 );
   return got ? got : rc;
 }
 
 
-static ssize_t sfn_write(union handle h, const void* buf, size_t len, int flags)
+static ssize_t sfn_write(union handle h, const void* buf, size_t len, NT_UNUSED int flags)
 {
   return write(h.fd, buf, len);
 }
@@ -875,10 +876,12 @@ static void select_add(int fd)
 }
 
 
-static ssize_t select_recv(union handle h, void* buf, size_t len, int flags)
+static ssize_t select_recv(union handle h, void* buf, size_t buf_len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
-  int i, rc, got = 0, all = flags & MSG_WAITALL;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
+  unsigned int i;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
@@ -917,10 +920,11 @@ static void poll_add(int fd)
 }
 
 
-static ssize_t poll_recv(union handle h, void* buf, size_t len, int flags)
+static ssize_t poll_recv(union handle h, void* buf, size_t buf_len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
-  int rc, got = 0, all = flags & MSG_WAITALL;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   if( cfg_spin[0] )
     mux_flags |= NT_MUX_SPIN;
@@ -964,11 +968,12 @@ static void epoll_add(int fd)
 }
 
 
-static ssize_t epolltype_recv(union handle h, void* buf, size_t len, int flags)
+static ssize_t epolltype_recv(union handle h, void* buf, size_t buf_len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
   struct epoll_event e;
-  int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   union handle mh;
   enum handle_type mh_type;
@@ -1011,11 +1016,12 @@ static ssize_t epolltype_recv(union handle h, void* buf, size_t len, int flags)
 }
 
 
-static ssize_t epoll_mod_recv(union handle h, void* buf, size_t len, int flags)
+static ssize_t epoll_mod_recv(union handle h, void* buf, size_t buf_len, int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
   struct epoll_event e;
-  int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   union handle mh = { .fd = epoll_fd };
 
@@ -1044,12 +1050,13 @@ static ssize_t epoll_mod_recv(union handle h, void* buf, size_t len, int flags)
 }
 
 
-static ssize_t epoll_adddel_recv(union handle h, void* buf, size_t len,
+static ssize_t epoll_adddel_recv(union handle h, void* buf, size_t buf_len,
                                  int flags)
 {
   enum sfnt_mux_flags mux_flags = NT_MUX_CONTINUE_ON_EINTR;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
   struct epoll_event e;
-  int rc, got = 0, all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   union handle mh = { .fd = epoll_fd };
 
@@ -1093,9 +1100,10 @@ static void zf_mux_init(void)
 
 /**********************************************************************/
 
-static ssize_t spin_recv(union handle h, void* buf, size_t len, int flags)
+static ssize_t spin_recv(union handle h, void* buf, size_t buf_len, int flags)
 {
-  int rc, got = 0, all = flags & MSG_WAITALL;
+  ssize_t rc, got = 0, len = buf_len;
+  bool all = flags & MSG_WAITALL;
   flags = (flags & ~MSG_WAITALL) | MSG_DONTWAIT;
   do {
     while( (rc = do_recv(h, (char*) buf + got, len - got, flags)) < 0 )
@@ -2052,11 +2060,6 @@ static int do_server(void)
       NT_TRY(listen(sl6, 1));
     }
   }
-  if( sl < 0 && sl6 < 0 ) {
-    sfnt_err("%s: server: cannot specify both --ipv4 and --ipv6\n",
-             sfnt_app_name);
-    exit(3);
-  }
   if( ! sfnt_quiet )
     sfnt_err("%s: server: waiting for client to connect...\n", sfnt_app_name);
   if( sl >= 0 && sl6 >= 0 ) {
@@ -2084,6 +2087,10 @@ static int do_server(void)
   }
   else if( sl6 >= 0 ) {
     NT_TRY2(ss, accept(sl6, NULL, NULL));
+  } else {
+    sfnt_err("%s: server: cannot specify both --ipv4 and --ipv6\n",
+             sfnt_app_name);
+    exit(3);
   }
   if( ! sfnt_quiet )
     sfnt_err("%s: server: client connected\n", sfnt_app_name);
@@ -2387,7 +2394,7 @@ static void do_test(int ss, union handle read_handle, union handle write_handle,
 static unsigned log2_le(unsigned n)
 {
   unsigned order = 0;
-  while( (1 << order) <= n )
+  while( (1u << order) <= n )
     ++order;
   return order - 1;
 }
@@ -2680,6 +2687,8 @@ static int do_client2(int ss, const char* hostport, int local)
     NT_TRY(zf_tcp_connect(ss, th, host, port, &read_h.t));
     write_h.t = read_h.t;
     break;
+  default:
+    NT_ASSERT(0);
   }
 #endif
 #ifdef USE_DPDK
@@ -2791,7 +2800,7 @@ int main(int argc, char* argv[])
   if( cfg_minms > cfg_maxms )
     cfg_maxms = cfg_minms;
   NT_ASSERT(cfg_maxiter >= cfg_miniter);
-  timeout_ms = cfg_timeout[0] ? cfg_timeout[0] * 1000 : -1;
+  timeout_ms = cfg_timeout[0] ? (int) cfg_timeout[0] * 1000 : -1;
 
 #if defined(__unix__) ||  defined(__APPLE__)
   if( cfg_forkboth ) {

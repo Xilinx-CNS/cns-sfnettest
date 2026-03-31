@@ -48,8 +48,11 @@ void sfnt_ilist_append(struct sfnt_ilist* ilist, int i)
 {
   NT_ASSERTi3(ilist->len, <=, ilist->alloc_len);
   if( ilist->len == ilist->alloc_len ) {
+    int *newlist;
     ilist->alloc_len *= 2;
-    ilist->list = realloc(ilist->list, ilist->alloc_len * sizeof(int));
+    newlist = realloc(ilist->list, ilist->alloc_len * sizeof(int));
+    NT_ASSERT(newlist);
+    ilist->list = newlist;
   }
   ilist->list[ilist->len++] = i;
 }
