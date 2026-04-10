@@ -339,6 +339,9 @@ zc_recv_callback(struct onload_zc_recv_args *args, NT_UNUSED int flag)
     }
   }
 
+  /* Accumulated length ignored */
+  (void) len;
+
   /* Only need to store and release the first buffer handle for each datagram */
   send_buf[send_buf_i] = args->msg.iov[0].buf;
   ++send_buf_i;
