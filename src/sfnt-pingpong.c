@@ -2687,8 +2687,6 @@ static int do_client2(int ss, const char* hostport, int local)
     NT_TRY(zf_tcp_connect(ss, th, host, port, &read_h.t));
     write_h.t = read_h.t;
     break;
-  default:
-    NT_ASSERT(0);
   }
 #endif
 #ifdef USE_DPDK
