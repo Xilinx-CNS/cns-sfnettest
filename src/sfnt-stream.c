@@ -1322,7 +1322,7 @@ static int do_server2(int ss)
   if( handle_type == HT_ZF_UDP )
     NT_TRY(zfut_alloc(&server.write_handle.ut, ztack,
                       (struct sockaddr*) &my_sa, sizeof(my_sa),
-                      to_sa, to_sa_len, 0, zattr));
+                      (struct sockaddr*) &to_sa, to_sa_len, 0, zattr));
 #endif
 
   return do_server3(&server);
@@ -2239,7 +2239,7 @@ static int do_client2(int ss, const char* hostport, int local)
   case HT_ZF_UDP: {
     char reply_hostport[80];
 
-    NT_TESTi3(sa.ss_family, ==, AF_INET);
+    NT_TESTi3(to_sa.ss_family, ==, AF_INET);
     NT_TRY(zfut_alloc(&ctx->write_handle.ut, ztack_client_tx,
                       (struct sockaddr*) &my_sa, sizeof(struct sockaddr_in),
                       ai->ai_addr, ai->ai_addrlen, 0, zattr));
