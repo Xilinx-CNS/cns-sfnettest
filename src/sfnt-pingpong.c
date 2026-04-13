@@ -344,10 +344,11 @@ static ssize_t sfn_write(union handle h, const void* buf, size_t len, NT_UNUSED 
 
 
 #ifdef USE_ZF
-static ssize_t rfn_zfur_recv(union handle h, void* buf, size_t len, int flags)
+static ssize_t rfn_zfur_recv(union handle h, NT_UNUSED void* buf, size_t len, int flags)
 {
-  int got = 0, all = flags & MSG_WAITALL;
-  int ovl = flags & ZF_OVERLAPPED_WAIT;
+  size_t got = 0;
+  bool all = flags & MSG_WAITALL;
+  bool ovl = flags & ZF_OVERLAPPED_WAIT;
   int i;
 
   do {
@@ -392,7 +393,7 @@ static ssize_t rfn_zfur_recv(union handle h, void* buf, size_t len, int flags)
 
 
 static ssize_t sfn_zfut_send(union handle h, const void* buf, size_t len,
-                             int flags)
+                             NT_UNUSED int flags)
 {
   const struct iovec siov = {
     .iov_base = (void*)buf,
@@ -400,14 +401,15 @@ static ssize_t sfn_zfut_send(union handle h, const void* buf, size_t len,
   };
 
   int rc = zfut_send(h.ut, &siov, 1, 0);
-  return rc == 0 ? len : rc;
+  return rc == 0 ? (ssize_t) len : rc;
 }
 
 
-static ssize_t rfn_zft_recv(union handle h, void* buf, size_t len, int flags)
+static ssize_t rfn_zft_recv(union handle h, NT_UNUSED void* buf, size_t len, int flags)
 {
-  int got = 0, all = flags & MSG_WAITALL;
-  int ovl = flags & ZF_OVERLAPPED_WAIT;
+  size_t got = 0;
+  bool all = flags & MSG_WAITALL;
+  bool ovl = flags & ZF_OVERLAPPED_WAIT;
   int i;
   int repeat;
 
@@ -462,7 +464,7 @@ static ssize_t rfn_zft_recv(union handle h, void* buf, size_t len, int flags)
 
 
 static ssize_t sfn_zft_send(union handle h, const void* buf, size_t len,
-                            int flags)
+                            NT_UNUSED int flags)
 {
   const struct iovec siov = {
     .iov_base = (void*)buf,
@@ -470,7 +472,7 @@ static ssize_t sfn_zft_send(union handle h, const void* buf, size_t len,
   };
 
   int rc = zft_send(h.t, &siov, 1, 0);
-  return rc == 0 ? len : rc;
+  return rc == 0 ? (ssize_t) len : rc;
 }
 #endif
 

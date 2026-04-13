@@ -398,7 +398,8 @@ static ssize_t rfn_zfur_recv(union handle h, void* buf, size_t len, int flags)
     struct iovec iov[1];
   } rd;
 
-  int got = 0, all = flags & MSG_WAITALL;
+  size_t got = 0;
+  bool all = flags & MSG_WAITALL;
   uint64_t tsc_now, tsc_timeout;
   flags = 0;
 
@@ -432,7 +433,7 @@ static ssize_t rfn_zfur_recv(union handle h, void* buf, size_t len, int flags)
   } while( got == 0 || (all && got < len) );
 
  out:
-  return got ? got : -1;
+  return got ? (ssize_t) got : -1;
 }
 
 
@@ -446,7 +447,7 @@ static void maybe_poll_tx_ztack(void)
 
 
 static ssize_t sfn_zfut_send(union handle h, const void* buf, size_t len,
-                             int flags)
+                             NT_UNUSED int flags)
 {
   const struct iovec siov = {
     .iov_base = (void*)buf,
@@ -466,7 +467,7 @@ static ssize_t sfn_zfut_send(union handle h, const void* buf, size_t len,
       maybe_poll_tx_ztack();
     }
   } while( rc == -EAGAIN );
-  return rc == 0 ? len : rc;
+  return rc == 0 ? (ssize_t) len : rc;
 }
 #endif
 
