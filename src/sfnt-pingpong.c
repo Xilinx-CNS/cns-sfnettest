@@ -2728,6 +2728,7 @@ static int do_client2(int ss, const char* hostport, int local)
   if( server_ld_preload != NULL )
     printf("# server LD_PRELOAD=%s\n", server_ld_preload);
   printf("# percentile=%g\n", (double) cfg_percentile);
+  printf("# reporting: %s\n", cfg_rtt ? "RTT" : "1/2 RTT");
   printf("#\n");
   printf("#\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
               "size", "mean", "min", "median", "max", "%ile", "stddev", "iter");
