@@ -363,18 +363,18 @@ static int parse_cfg_opt(int argc, char** argv, const char* context)
   if( val && a->num > 0 ) {
     char *p, *v = strdup(val);
     for( i = 0; i < a->num; ++i )
-      if( (p = strchr(val, ';')) != NULL ) {
+      if( (p = strchr(v, ';')) != NULL ) {
         *p = '\0';
-        cla_get_val(context, opt_name, a, i, val);
-        val = p + 1;
+        cla_get_val(context, opt_name, a, i, v);
+        v = p + 1;
       }
       else {
-        cla_get_val(context, opt_name, a, i, val);
-        val = NULL;
+        cla_get_val(context, opt_name, a, i, v);
+        v = NULL;
         ++i;
         break;
       }
-    if( val != NULL )
+    if( v != NULL )
       bad_cla(context, opt_name, "too many values");
     if( a->flags & SFNT_CLAF_FILL ) {
       int siz = sizeof_cla_type(a->type);
