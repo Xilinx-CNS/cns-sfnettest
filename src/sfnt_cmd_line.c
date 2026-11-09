@@ -362,6 +362,7 @@ static int parse_cfg_opt(int argc, char** argv, const char* context)
 
   if( val && a->num > 0 ) {
     char *p, *v = strdup(val);
+	char *val = v;
     for( i = 0; i < a->num; ++i )
       if( (p = strchr(val, ';')) != NULL ) {
         *p = '\0';
